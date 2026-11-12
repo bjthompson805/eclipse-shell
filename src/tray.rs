@@ -198,7 +198,13 @@ fn refresh(key: &str) {
             icon_name: string(if attention { "AttentionIconName" } else { "IconName" }),
             icon_theme_path: string("IconThemePath"),
             pixmaps,
-            title: string("Title"),
+            // Electron apps leave Title empty and name themselves in the
+            // tooltip, a (icon, pixmaps, title, description) struct.
+            title: props
+                .lookup_value("ToolTip", None)
+                .and_then(|t| (t.n_children() >= 3).then(|| t.child_value(2).str().map(String::from)).flatten())
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_else(|| string("Title")),
             menu: props.lookup_value("Menu", None).and_then(|m| m.str().map(String::from)).filter(|m| m != "/"),
             item_is_menu: props.lookup::<bool>("ItemIsMenu").ok().flatten().unwrap_or(false),
             ..item

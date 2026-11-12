@@ -7,22 +7,29 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use gtk4 as gtk;
 
+use crate::hint;
 use crate::tray::{self, Item, MenuEntry};
 
 const REST_OPACITY: f64 = 0.78;
 
-pub fn tray(s: f64) -> gtk::Box {
+/// Each icon's title shows on `hints` at `hint_y` while it's hovered.
+pub fn tray(s: f64, hints: &gtk::Fixed, hint_y: f64) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, (9.0 * s).round() as i32);
     let rebuild = {
-        let row = row.downgrade();
+        let (row, hints) = (row.downgrade(), hints.downgrade());
         move || {
+            let Some(hints) = hints.upgrade() else { return };
             let Some(row) = row.upgrade() else { return };
             while let Some(child) = row.first_child() {
                 row.remove(&child);
             }
             let items = tray::items();
             for item in &items {
-                row.append(&icon(s, item));
+                let icon = icon(s, item);
+                if !item.title.is_empty() {
+                    hint::float_under(&icon, &hints, s, hint_y, &item.title);
+                }
+                row.append(&icon);
             }
             row.set_visible(!items.is_empty());
         }
@@ -39,9 +46,6 @@ fn icon(s: f64, item: &Item) -> gtk::Image {
     image.set_size_request(px, px);
     image.set_opacity(REST_OPACITY);
     image.set_cursor_from_name(Some("pointer"));
-    if !item.title.is_empty() {
-        image.set_tooltip_text(Some(&item.title));
-    }
     match texture(item, px * 2) {
         Some(paintable) => image.set_paintable(Some(&paintable)),
         None => image.set_icon_name(Some("application-x-executable")),

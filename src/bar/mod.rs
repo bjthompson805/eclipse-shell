@@ -28,6 +28,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::config;
 use crate::hyprland::State;
+use crate::hint;
 use crate::mark;
 use crate::theme;
 use module::{Module, ModuleSpec};
@@ -113,12 +114,15 @@ impl Bar {
 
         let workspaces = Workspaces::new(s);
         let title = Title::new(s);
-        let (content, anchors) = band_content(s, band, &workspaces, &title, actions);
+        // Hover hints float just under the band.
+        let hints = hint::layer();
+        let (content, anchors) = band_content(s, band, &workspaces, &title, actions, &hints, top + 6.0 * s);
         content.set_size_request(-1, top.round() as i32);
 
         let layers = gtk::Overlay::new();
         layers.set_child(Some(&canvas));
         layers.add_overlay(&content);
+        layers.add_overlay(&hints);
         frame.set_child(Some(&layers));
 
         reserve.present();
@@ -256,7 +260,8 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>) -> (gtk::Overlay, Anchors) {
+/// `hints` is the layer hover hints float on, with their tops at `hint_y`.
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>, hints: &gtk::Fixed, hint_y: f64) -> (gtk::Overlay, Anchors) {
     let mut anchors = Anchors::default();
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
@@ -376,7 +381,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         right.append(&weather.widget);
     }
     if config::BAR_TRAY {
-        let icons = tray::tray(s);
+        let icons = tray::tray(s, hints, hint_y);
         let tray = Module::new(&icons, ModuleSpec { interactive: false, ..pill(11.0 * s) });
         icons.bind_property("visible", &tray.widget, "visible").sync_create().build();
         right.append(&tray.widget);

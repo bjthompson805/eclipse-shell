@@ -6,6 +6,7 @@ mod calendar;
 mod config;
 mod display_popout;
 mod fader;
+mod hint;
 mod hyprland;
 mod icons;
 mod launcher;
