@@ -33,6 +33,8 @@ pub const BAR_AGENT_USAGE: bool = true;
 pub const BAR_NET_SPEED: bool = true;
 /// Show volume, brightness, network, Bluetooth and battery glyphs.
 pub const BAR_STATUS: bool = true;
+/// Show the current weather (from WEATHER_LOCATION).
+pub const BAR_WEATHER: bool = true;
 
 /// Show only workspaces up to the highest occupied one (plus the active one).
 pub const OCCUPIED_WORKSPACES_ONLY: bool = true;
