@@ -7,6 +7,7 @@
 
 mod clock;
 mod module;
+mod stats;
 mod title;
 mod workspaces;
 
@@ -155,7 +156,7 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
     let _ = cr.stroke();
 }
 
-/// The band: mark, workspaces and title on the left, the clock centred, and
+/// The band: mark, workspaces, system stats and title on the left, the clock centred, and
 /// the power button on the right.
 fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>) -> gtk::CenterBox {
     let span = (band * 0.76).round();
@@ -169,6 +170,10 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     let left = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_start(edge_margin).build();
     left.append(&mark.widget);
     left.append(&spaces.widget);
+    if config::BAR_STATS {
+        let stats = Module::new(&stats::stats(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
+        left.append(&stats.widget);
+    }
     left.append(&title.widget);
 
     let clock = Module::new(&clock::clock(s), pill(13.0 * s));

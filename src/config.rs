@@ -25,6 +25,9 @@ pub const WEATHER_LOCATION: &str = "Sisters, Oregon";
 pub const CLOCK_24H: bool = false;
 pub const CLOCK_SECONDS: bool = true;
 
+/// Show the CPU, memory and temperature readout.
+pub const BAR_STATS: bool = true;
+
 /// Show only workspaces up to the highest occupied one (plus the active one).
 pub const OCCUPIED_WORKSPACES_ONLY: bool = true;
 /// Show per-window app icons inside occupied workspace pills.

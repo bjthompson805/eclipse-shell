@@ -314,11 +314,20 @@ impl TextStyle {
 
 /// A Material Symbols glyph, picked by ligature name.
 pub fn icon_glyph(name: &str, px: f64, color: Rgba) -> gtk::Label {
+    glyph(name, px, color, "FILL=0,opsz=20")
+}
+
+/// The solid variant of [`icon_glyph`].
+pub fn filled_icon_glyph(name: &str, px: f64, color: Rgba) -> gtk::Label {
+    glyph(name, px, color, "FILL=1,opsz=20")
+}
+
+fn glyph(name: &str, px: f64, color: Rgba, variations: &str) -> gtk::Label {
     let style = TextStyle { family: config::ICON_FONT, px, weight: pango::Weight::Medium, color, tracking: 0.0 };
     let label = style.label(name);
     let attrs = style.attrs();
     let mut font = style.font();
-    font.set_variations(Some("FILL=0,opsz=20"));
+    font.set_variations(Some(variations));
     attrs.insert(pango::AttrFontDesc::new(&font));
     label.set_attributes(Some(&attrs));
     label
