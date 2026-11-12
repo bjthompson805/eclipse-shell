@@ -37,7 +37,7 @@ impl Metrics {
         let dot = 10.0 * s;
         let icon = 9.0 * s;
         let icon_pad_cross = 4.0 * s;
-        let cross = if config::WORKSPACE_ICONS { dot.max(icon + 2.0 * icon_pad_cross) } else { dot };
+        let cross = if config::get().workspace_icons { dot.max(icon + 2.0 * icon_pad_cross) } else { dot };
         Self {
             dot,
             active_len: dot * 2.2,
@@ -211,7 +211,7 @@ impl Workspaces {
         let mut classes: HashMap<i32, Vec<String>> = HashMap::new();
         for window in &state.windows {
             let list = classes.entry(window.workspace).or_default();
-            if config::WORKSPACE_ICONS && !window.class.is_empty() && !list.contains(&window.class) && list.len() < MAX_ICONS {
+            if config::get().workspace_icons && !window.class.is_empty() && !list.contains(&window.class) && list.len() < MAX_ICONS {
                 list.push(window.class.clone());
             }
         }
@@ -243,7 +243,7 @@ impl Workspaces {
 /// run of at least five that grows to cover any used higher number.
 fn shown_workspaces(active: i32, occupied: impl Fn(i32) -> bool) -> Vec<i32> {
     let base = (active - 1).div_euclid(10) * 10;
-    if config::OCCUPIED_WORKSPACES_ONLY {
+    if config::get().occupied_workspaces_only {
         let highest = (1..=10).filter(|&i| occupied(base + i)).max().unwrap_or(0);
         let ids: Vec<i32> = (1..=10).map(|i| base + i).filter(|&id| id - base <= highest || id == active).collect();
         if ids.is_empty() { vec![active] } else { ids }

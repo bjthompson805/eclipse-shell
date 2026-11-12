@@ -195,7 +195,7 @@ impl Overview {
                 return;
             }
             overview.layers.set_opacity(0.0);
-            hyprland::hold_blur(config::LAUNCHER_BLUR);
+            hyprland::hold_blur(config::get().launcher_blur);
             overview.window.present();
             overview.animate(1.0);
             overview.load_wallpaper();

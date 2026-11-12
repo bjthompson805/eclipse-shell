@@ -3,7 +3,7 @@
 //! local library. Everything here blocks (curl, ffmpeg, disk), so it runs on
 //! worker threads.
 //!
-//! The two live sites are scraped as Ryoku did; if a site changes its pages,
+//! The two live sites are scraped; if a site changes its pages,
 //! its search comes back empty or with an error rather than breaking others.
 
 use std::path::{Path, PathBuf};

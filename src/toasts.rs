@@ -110,7 +110,7 @@ impl Toasts {
         let px = |v: f64| (v * s).round() as i32;
         self.window.set_monitor(self.monitor.borrow().as_ref());
         self.window.set_margin(Edge::Top, px(6.0));
-        self.window.set_margin(Edge::Right, (config::FRAME_EDGE + 8.0 * s).round() as i32);
+        self.window.set_margin(Edge::Right, (config::get().frame_edge + 8.0 * s).round() as i32);
         self.column.set_spacing(px(8.0));
 
         for id in active.iter().take(SHOWN) {

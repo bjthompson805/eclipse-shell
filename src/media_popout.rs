@@ -587,7 +587,7 @@ fn draw_art(cr: &cairo::Context, w: f64, h: f64, art: Option<&ImageSurface>, s: 
             let _ = cr.fill();
             let layout = pangocairo::functions::create_layout(cr);
             layout.set_text("music_note");
-            layout.set_attributes(Some(&TextStyle { family: config::ICON_FONT, ..TextStyle::new(30.0 * s, pango::Weight::Medium, ICON_DIM) }.attrs()));
+            layout.set_attributes(Some(&TextStyle { family: config::get().icon_font.as_str(), ..TextStyle::new(30.0 * s, pango::Weight::Medium, ICON_DIM) }.attrs()));
             let (_, logical) = layout.pixel_extents();
             cr.move_to((w - f64::from(logical.width())) / 2.0, (h - f64::from(logical.height())) / 2.0);
             pangocairo::functions::show_layout(cr, &layout);

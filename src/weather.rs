@@ -223,7 +223,7 @@ async fn location() -> Result<Location, Box<dyn std::error::Error>> {
     if let Some(known) = LOCATION.with(|l| l.borrow().clone()) {
         return Ok(known);
     }
-    let location: Location = match config::WEATHER_LOCATION {
+    let location: Location = match config::get().weather_location.as_str() {
         "" => serde_json::from_str(&curl("http://ip-api.com/json/?fields=city,lat,lon").await?)?,
         place => geocode(place).await?,
     };

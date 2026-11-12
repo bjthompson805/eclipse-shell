@@ -7,7 +7,7 @@ mod bluetooth;
 mod bluetooth_popout;
 mod calendar;
 mod capture;
-mod chrome;
+mod app_window;
 mod clipboard;
 mod clipboard_popout;
 mod controls;
@@ -15,6 +15,7 @@ mod config;
 mod display_popout;
 mod fader;
 mod hint;
+mod hub;
 mod hyprland;
 mod icons;
 mod inbox_popout;
@@ -322,6 +323,10 @@ fn main() -> glib::ExitCode {
     if args.get(1).map(String::as_str) == Some("walls") {
         return walls::run();
     }
+    // So is the hub, the settings app.
+    if args.get(1).map(String::as_str) == Some("hub") {
+        return hub::run(&args[2..]);
+    }
     if args.get(1).map(String::as_str) == Some("livewall") {
         let Some(clip) = args.get(2) else {
             eprintln!("usage: eclipse-shell livewall <clip>");
@@ -353,8 +358,14 @@ fn main() -> glib::ExitCode {
         }
     });
     app.connect_command_line(move |app, command_line| {
-        app.activate();
         let args = command_line.arguments();
+        // From the hub, to restart on new settings; without a shell running,
+        // there is nothing to start first.
+        if args.get(1).and_then(|arg| arg.to_str()) == Some("quit") {
+            app.quit();
+            return 0.into();
+        }
+        app.activate();
         match args.get(1).and_then(|arg| arg.to_str()) {
             None => {}
             Some("toggle-launcher") => {

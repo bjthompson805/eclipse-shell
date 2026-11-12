@@ -8,7 +8,7 @@ use crate::config;
 use crate::theme::{TextStyle, CREAM, DIM};
 
 pub fn time_text(now: &glib::DateTime) -> String {
-    let format = match (config::CLOCK_24H, config::CLOCK_SECONDS) {
+    let format = match (config::get().clock_24h, config::get().clock_seconds) {
         (true, true) => "%H:%M:%S",
         (true, false) => "%H:%M",
         (false, true) => "%-I:%M:%S %p",

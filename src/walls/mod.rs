@@ -10,7 +10,7 @@
 mod adjust;
 mod sources;
 mod tune;
-mod ui;
+pub mod ui;
 mod video;
 
 use std::cell::{Cell, RefCell};
@@ -203,7 +203,7 @@ impl Walls {
         let right = gtk::Box::new(gtk::Orientation::Vertical, px(8.0));
         let close_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         close_row.set_halign(gtk::Align::End);
-        close_row.append(&crate::chrome::close_button(s, &walls.window));
+        close_row.append(&crate::app_window::close_button(s, &walls.window));
         right.append(&close_row);
         side_frame.set_vexpand(true);
         right.append(&side_frame);

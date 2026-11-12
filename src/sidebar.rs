@@ -178,7 +178,7 @@ impl Sidebar {
         }
         let content = content.clone().upcast::<gtk::Widget>();
         let s = self.scale();
-        content.set_size_request(((self.width - config::FRAME_EDGE) * s).round() as i32, self.height());
+        content.set_size_request(((self.width - config::get().frame_edge) * s).round() as i32, self.height());
         self.stage.put(&content, 0.0, 0.0);
         *self.content.borrow_mut() = Some(content);
         self.place(self.openness.borrow().value);
@@ -196,12 +196,12 @@ impl Sidebar {
 
     /// Where the panel's surface starts: the bar's underside, less the overlap.
     fn top(&self) -> f64 {
-        config::FRAME_EDGE + config::BAR_HEIGHT * self.scale() - OVERLAP
+        config::get().frame_edge + config::get().bar_height * self.scale() - OVERLAP
     }
 
     fn height(&self) -> i32 {
         let screen = self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height());
-        (f64::from(screen) - self.top()).round() as i32 - config::FRAME_EDGE.round() as i32
+        (f64::from(screen) - self.top()).round() as i32 - config::get().frame_edge.round() as i32
     }
 
     pub fn toggle(self: &Rc<Self>) {
@@ -292,7 +292,7 @@ impl Sidebar {
         let monitor = self.monitor.borrow().clone();
         self.window.set_monitor(monitor.as_ref());
         self.window.set_margin(Edge::Top, self.top().round() as i32);
-        let width = self.width * s + config::FRAME_RADIUS + config::SHADOW_SIZE + 2.0;
+        let width = self.width * s + config::get().frame_radius + config::get().shadow_size + 2.0;
         self.window.set_default_size(width.ceil() as i32, self.height());
         self.stage.set_size_request(width.ceil() as i32, self.height());
         // The panel animates itself; Hyprland's own layer animation would
@@ -338,7 +338,7 @@ impl Sidebar {
 
     /// Where the hole's edge sits at openness `t`, from the screen edge.
     fn reach(&self, t: f64) -> f64 {
-        let edge = config::FRAME_EDGE;
+        let edge = config::get().frame_edge;
         edge + (self.width * self.scale() - edge) * t
     }
 
@@ -348,7 +348,7 @@ impl Sidebar {
         let s = self.scale();
         // The canvas, not the stage: content slid off the right grows the stage.
         let surface_w = f64::from(if self.canvas.width() > 0 { self.canvas.width() } else { self.stage.width_request() });
-        let content_w = (self.width - config::FRAME_EDGE) * s;
+        let content_w = (self.width - config::get().frame_edge) * s;
         if let Some(content) = self.content.borrow().as_ref() {
             let x = match self.side {
                 Side::Left => reach - content_w,
@@ -376,10 +376,10 @@ impl Sidebar {
         }
         let palette = theme::palette();
         let reach = self.reach(self.openness.borrow().value);
-        let radius = config::FRAME_RADIUS;
+        let radius = config::get().frame_radius;
         // The hole runs on past the surface's far side and from its top (the
         // bar's underside) to the bottom frame edge.
-        let bottom = h - config::FRAME_EDGE;
+        let bottom = h - config::get().frame_edge;
         let hole = |cr: &cairo::Context, inset: f64| {
             theme::rounded_rect(cr, reach + inset, OVERLAP + inset, w + radius * 2.0, bottom - OVERLAP - 2.0 * inset, (radius - inset).max(0.0));
         };
@@ -393,18 +393,18 @@ impl Sidebar {
         let _ = cr.save();
         hole(cr, 0.0);
         cr.clip();
-        let size = config::SHADOW_SIZE;
+        let size = config::get().shadow_size;
         cr.set_line_width(1.0);
         for step in 0..size as i32 {
             let falloff = 1.0 - f64::from(step) / size;
             hole(cr, f64::from(step) + 0.5);
-            cr.set_source_rgba(0.0, 0.0, 0.0, config::SHADOW_STRENGTH * 0.35 * falloff * falloff);
+            cr.set_source_rgba(0.0, 0.0, 0.0, config::get().shadow_strength * 0.35 * falloff * falloff);
             let _ = cr.stroke();
         }
         let _ = cr.restore();
 
         hole(cr, 0.0);
-        cr.set_line_width(config::FRAME_BORDER_WIDTH);
+        cr.set_line_width(config::get().frame_border_width);
         theme::set_source(cr, palette.edge);
         let _ = cr.stroke();
     }

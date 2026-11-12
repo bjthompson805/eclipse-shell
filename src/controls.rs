@@ -358,7 +358,7 @@ fn header(s: f64) -> (gtk::Box, gtk::Box) {
     times.append(&date);
     row.append(&times);
     let paint = move |now: &glib::DateTime| {
-        let format = if crate::config::CLOCK_24H { "%H:%M" } else { "%-I:%M %p" };
+        let format = if crate::config::get().clock_24h { "%H:%M" } else { "%-I:%M %p" };
         time.set_text(&now.format(format).map(String::from).unwrap_or_default());
         date.set_text(&now.format("%A, %-d %B").map(String::from).unwrap_or_default());
     };

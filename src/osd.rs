@@ -179,7 +179,7 @@ impl Osd {
     fn show(self: &Rc<Self>) {
         let s = self.scale();
         self.window.set_monitor(self.monitor.borrow().as_ref());
-        self.window.set_margin(Edge::Top, (config::FRAME_EDGE + config::BAR_HEIGHT * s + 10.0 * s).round() as i32);
+        self.window.set_margin(Edge::Top, (config::get().frame_edge + config::get().bar_height * s + 10.0 * s).round() as i32);
         self.window.set_default_size((WIDTH * s).round() as i32, (HEIGHT * s).round() as i32);
         // On the backdrop, not the row: the row's margins sit inside this size.
         let panel = self.window.child().and_downcast::<gtk::Overlay>().expect("the panel");

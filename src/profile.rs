@@ -552,8 +552,8 @@ fn sheet(s: f64, facts: &Facts, updaters: &mut Vec<Box<dyn Fn(&Stats)>>) -> gtk:
 
     sheet.append(&gap(s));
     sheet.append(&popout::eyebrow(s, "Look"));
-    sheet.append(&spec(s, "Font", config::FONT));
-    sheet.append(&spec(s, "Icons", config::ICON_THEME));
+    sheet.append(&spec(s, "Font", config::get().font.as_str()));
+    sheet.append(&spec(s, "Icons", config::get().icon_theme.as_str()));
     let wall = spec(s, "Wallpaper", "–");
     let value = wall.last_child().and_downcast::<gtk::Label>();
     glib::spawn_future_local(async move {

@@ -163,14 +163,16 @@ pub fn field(s: f64, glyph: &str, placeholder: &str) -> (gtk::Overlay, gtk::Text
 }
 
 /// A labelled slider over `min..=max` with a value readout; `changed` gets
-/// each new value while dragging.
+/// each new value while dragging. An empty `name` leaves the label out.
 pub fn slider(s: f64, name: &str, min: f64, max: f64, value: f64, format: fn(f64) -> String, changed: impl Fn(f64) + 'static) -> gtk::Box {
     let px = |v: f64| (v * s).round() as i32;
     let row = gtk::Box::new(gtk::Orientation::Horizontal, px(10.0));
-    let label = TextStyle::new(10.0 * s, pango::Weight::Medium, SUBTLE).label(name);
-    label.set_width_chars(10);
-    label.set_xalign(0.0);
-    row.append(&label);
+    if !name.is_empty() {
+        let label = TextStyle::new(10.0 * s, pango::Weight::Medium, SUBTLE).label(name);
+        label.set_width_chars(10);
+        label.set_xalign(0.0);
+        row.append(&label);
+    }
     let readout = TextStyle::new(10.0 * s, pango::Weight::Medium, CREAM).mono().label(&format(value));
     readout.set_width_chars(5);
     readout.set_xalign(1.0);

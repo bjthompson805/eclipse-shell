@@ -149,7 +149,7 @@ impl Power {
 
     fn build(self: &Rc<Self>, s: f64) {
         let (card_w, hero_h, strip_h) = (640.0 * s, 260.0 * s, 132.0 * s);
-        let radius = config::LAUNCHER_RADIUS;
+        let radius = config::get().launcher_radius;
 
         let background = gtk::DrawingArea::new();
         background.set_size_request(card_w.round() as i32, (hero_h + strip_h).round() as i32);
@@ -359,7 +359,7 @@ fn draw_tile(cr: &cairo::Context, w: f64, h: f64, s: f64, action: Action, hovere
     let label_color = if engaged { BRIGHT } else if hovered { SUBTLE } else { FAINT };
 
     let glyph = pangocairo::functions::create_layout(cr);
-    let style = TextStyle { family: config::ICON_FONT, ..TextStyle::new(22.0 * s, pango::Weight::Normal, glyph_color) };
+    let style = TextStyle { family: config::get().icon_font.as_str(), ..TextStyle::new(22.0 * s, pango::Weight::Normal, glyph_color) };
     glyph.set_text(action.glyph());
     glyph.set_attributes(Some(&style.attrs()));
     let label = pangocairo::functions::create_layout(cr);

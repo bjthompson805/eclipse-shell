@@ -91,22 +91,10 @@ if [ -f /usr/local/etc/doas.conf ] && ! grep -q 'eclipse-priv' /usr/local/etc/do
 	printf 'permit nopass %s as root cmd /usr/local/libexec/eclipse-priv\n' "$user" >>/usr/local/etc/doas.conf
 fi
 
-# Carry the charge limit over from Ryoku, else find out whether there is one.
+# Find out whether there is a charge limit.
 if [ ! -f /var/db/eclipse-charge-limit ]; then
-	if [ -f /var/db/ryoku-charge-limit ]; then
-		install -o root -g wheel -m 644 /var/db/ryoku-charge-limit /var/db/eclipse-charge-limit
-	else
-		/usr/local/libexec/eclipse-priv charge-limit probe || :
-	fi
+	/usr/local/libexec/eclipse-priv charge-limit probe || :
 fi
-
-# Ryoku's power boot scripts would apply settings at boot too.
-for old in ryoku_charge_limit ryoku_power; do
-	if [ "$(sysrc -n "${old}_enable" 2>/dev/null)" = YES ]; then
-		sysrc -q "${old}_enable=NO" >/dev/null
-		echo "  turned off $old (eclipse_power takes over)"
-	fi
-done
 sysrc -q eclipse_power_enable=YES >/dev/null
 ROOT
 fi

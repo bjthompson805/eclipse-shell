@@ -268,11 +268,11 @@ pub struct TextStyle {
 
 impl TextStyle {
     pub fn new(px: f64, weight: pango::Weight, color: Rgba) -> Self {
-        Self { family: config::FONT, px, weight, color, tracking: 0.0 }
+        Self { family: config::get().font.as_str(), px, weight, color, tracking: 0.0 }
     }
 
     pub fn mono(self) -> Self {
-        Self { family: config::MONO_FONT, ..self }
+        Self { family: config::get().mono_font.as_str(), ..self }
     }
 
     pub fn tracking(self, px: f64) -> Self {
@@ -339,7 +339,7 @@ pub fn filled_icon_glyph(name: &str, px: f64, color: Rgba) -> gtk::Label {
 }
 
 fn glyph(name: &str, px: f64, color: Rgba, variations: &str) -> gtk::Label {
-    let style = TextStyle { family: config::ICON_FONT, px, weight: pango::Weight::Medium, color, tracking: 0.0 };
+    let style = TextStyle { family: config::get().icon_font.as_str(), px, weight: pango::Weight::Medium, color, tracking: 0.0 };
     let label = style.label(name);
     let attrs = style.attrs();
     let mut font = style.font();

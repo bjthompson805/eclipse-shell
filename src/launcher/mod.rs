@@ -220,8 +220,8 @@ impl Launcher {
     }
 
     fn force_blur(&self) {
-        if config::LAUNCHER_BLUR > 0 && !self.holding_blur.replace(true) {
-            hyprland::hold_blur(config::LAUNCHER_BLUR);
+        if config::get().launcher_blur > 0 && !self.holding_blur.replace(true) {
+            hyprland::hold_blur(config::get().launcher_blur);
         }
     }
 
@@ -484,7 +484,7 @@ impl Launcher {
         let background = gtk::DrawingArea::new();
         background.set_draw_func(|_, cr, w, h| {
             let palette = theme::palette();
-            theme::squircle(cr, 0.5, 0.5, f64::from(w) - 1.0, f64::from(h) - 1.0, config::LAUNCHER_RADIUS);
+            theme::squircle(cr, 0.5, 0.5, f64::from(w) - 1.0, f64::from(h) - 1.0, config::get().launcher_radius);
             theme::set_source(cr, palette.base);
             let _ = cr.fill_preserve();
             cr.set_line_width(1.0);

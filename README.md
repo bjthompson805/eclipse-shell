@@ -43,7 +43,13 @@ key:
 eclipse-shell toggle-launcher
 ```
 
-Settings currently live in `src/config.rs`.
+Settings live in `~/.config/eclipse-shell/settings.json`. Edit them in the
+hub, which also lists your Hyprland keybinds:
+
+```sh
+eclipse-shell hub           # settings
+eclipse-shell hub keybinds  # the keybind legend
+```
 
 ## License
 

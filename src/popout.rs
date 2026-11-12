@@ -1,6 +1,6 @@
 //! A popout: a card dropping from the bar on its own full-screen overlay
-//! surface. A click off the card or Escape closes it. As in Ryoku, the card
-//! is part of the frame: it hangs from the bar, flaring into it, with the
+//! surface. A click off the card or Escape closes it. The card is
+//! part of the frame: it hangs from the bar, flaring into it, with the
 //! frame's edge line running round it, and opens by growing down out of the
 //! bar on a springy curve. A clip grows over the content, which keeps its full
 //! size, and the content fades in over the first quarter.
@@ -19,12 +19,14 @@ use crate::{config, hint, hyprland, mark};
 
 const OPEN_MS: f64 = 500.0;
 const CLOSE_MS: f64 = 420.0;
-/// Ryoku's spatial curve; its overshoot is clipped to the content's height,
+/// A springy curve; its overshoot is clipped to the content's height,
 /// so it reads as a quick reveal that eases into place.
 const SPATIAL: Easing = Easing::Bezier(0.38, 1.21, 0.22, 1.0);
 const LINEAR: Easing = Easing::Bezier(0.0, 0.0, 1.0, 1.0);
 /// Radius of the concave corners where the card flares into the bar.
-const FLARE: f64 = config::FRAME_RADIUS;
+fn flare() -> f64 {
+    config::get().frame_radius
+}
 
 /// Where the card sits along the bar.
 #[derive(Clone, Copy)]
@@ -76,8 +78,8 @@ impl Popout {
         let card = gtk::Overlay::builder().valign(gtk::Align::Start).build();
         card.set_child(Some(&body(seam.clone())));
         let curtain = curtain();
-        curtain.set_margin_start(FLARE as i32);
-        curtain.set_margin_end(FLARE as i32);
+        curtain.set_margin_start(flare() as i32);
+        curtain.set_margin_end(flare() as i32);
         card.add_overlay(&curtain);
         card.set_measure_overlay(&curtain, true);
         let layers = gtk::Overlay::new();
@@ -190,14 +192,14 @@ impl Popout {
         let s = self.scale();
         self.window.set_monitor(monitor.as_ref());
         // The card starts a little above the bar's edge line so it covers it.
-        let line = config::FRAME_EDGE + config::BAR_HEIGHT * s;
+        let line = config::get().frame_edge + config::get().bar_height * s;
         let top = (line - 2.0).floor();
         self.top.set(top);
         self.seam.set(line - top);
         self.curtain.set_margin_top((line - top).ceil() as i32);
 
         // The flares stick out past the body, which keeps this far in.
-        let inset = config::FRAME_EDGE + 12.0 * s - FLARE;
+        let inset = config::get().frame_edge + 12.0 * s - flare();
         match anchor {
             Anchor::Right => {
                 self.card.set_halign(gtk::Align::End);
@@ -295,9 +297,10 @@ fn body(seam: Rc<Cell<f64>>) -> gtk::DrawingArea {
         let (w, h, y0) = (f64::from(w), f64::from(h), seam.get());
         let depth = (h - y0).max(0.0);
         // Both shrink while the card is barely open.
-        let flare = FLARE.min(depth / 2.0);
-        let r = config::LAUNCHER_RADIUS.min(depth / 2.0).min((w - 2.0 * FLARE) / 2.0).max(0.0);
-        let (left, right) = (FLARE, w - FLARE);
+        let full = flare();
+        let flare = full.min(depth / 2.0);
+        let r = config::get().launcher_radius.min(depth / 2.0).min((w - 2.0 * full) / 2.0).max(0.0);
+        let (left, right) = (full, w - full);
         // Arcs join on from the current point, if there is one.
         let outline = |cr: &gtk::cairo::Context| {
             cr.arc_negative(right + flare, y0 + flare, flare, -PI / 2.0, PI);
@@ -313,7 +316,7 @@ fn body(seam: Rc<Cell<f64>>) -> gtk::DrawingArea {
         let _ = cr.fill();
         cr.new_path();
         outline(cr);
-        cr.set_line_width(config::FRAME_BORDER_WIDTH);
+        cr.set_line_width(config::get().frame_border_width);
         theme::set_source(cr, palette.edge);
         let _ = cr.stroke();
     });
@@ -365,7 +368,7 @@ pub fn tinted_card(content: &impl IsA<gtk::Widget>, tint: Rc<Cell<Option<theme::
         if hung {
             cr.rectangle(0.0, 0.0, w, h);
         } else {
-            theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, config::LAUNCHER_RADIUS);
+            theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, config::get().launcher_radius);
             theme::set_source(cr, palette.base);
             let _ = cr.fill_preserve();
         }

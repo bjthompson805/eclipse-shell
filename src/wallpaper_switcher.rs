@@ -216,7 +216,7 @@ impl WallpaperSwitcher {
             switcher.selected.set(at);
             switcher.build();
             switcher.layers.set_opacity(0.0);
-            hyprland::hold_blur(config::LAUNCHER_BLUR);
+            hyprland::hold_blur(config::get().launcher_blur);
             switcher.window.present();
             switcher.animate(1.0);
             switcher.show_preview(true);

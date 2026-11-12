@@ -274,14 +274,10 @@ pub fn save_tune(path: &Path, tune: Option<serde_json::Value>) {
     let _ = std::fs::write(tunes_file(), serde_json::to_string_pretty(&all).unwrap_or_default());
 }
 
-/// Extra `wallust run` flags saved for this wallpaper: ours, else the one
-/// Ryoku's wallhaven app saved; others use the wallust config's defaults.
+/// Extra `wallust run` flags saved for this wallpaper; others use the wallust
+/// config's defaults.
 pub fn tune(path: &Path) -> Vec<String> {
-    let ryoku = || {
-        let t: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(glib::user_state_dir().join("ryoku-wallust.json")).ok()?).ok()?;
-        (t["image"].as_str() == path.to_str()).then_some(t)
-    };
-    let Some(t) = tunes().get(&path.display().to_string()).cloned().or_else(ryoku) else { return Vec::new() };
+    let Some(t) = tunes().get(&path.display().to_string()).cloned() else { return Vec::new() };
     tune_args(&t)
 }
 

@@ -475,7 +475,7 @@ fn profile_tab(s: f64, profile: Profile, current: bool, enabled: bool, pressed: 
             let _ = cr.stroke();
 
             // Glyph and label, centred together.
-            let icon = layout(cr, profile.glyph(), TextStyle { family: crate::config::ICON_FONT, ..TextStyle::new(13.0 * s, pango::Weight::Medium, if current { palette.accent_lit } else { ICON_DIM }) });
+            let icon = layout(cr, profile.glyph(), TextStyle { family: crate::config::get().icon_font.as_str(), ..TextStyle::new(13.0 * s, pango::Weight::Medium, if current { palette.accent_lit } else { ICON_DIM }) });
             let text = layout(cr, profile.label(), TextStyle::new(9.5 * s, pango::Weight::Semibold, if current { CREAM } else { SUBTLE }));
             let (iw, ih) = size(&icon);
             let (tw, th) = size(&text);
@@ -504,7 +504,7 @@ fn size(layout: &pango::Layout) -> (f64, f64) {
 }
 
 fn draw_glyph(cr: &cairo::Context, name: &str, px: f64, color: Rgba, w: f64, h: f64) {
-    let glyph = layout(cr, name, TextStyle { family: crate::config::ICON_FONT, ..TextStyle::new(px, pango::Weight::Medium, color) });
+    let glyph = layout(cr, name, TextStyle { family: crate::config::get().icon_font.as_str(), ..TextStyle::new(px, pango::Weight::Medium, color) });
     let (gw, gh) = size(&glyph);
     cr.move_to((w - gw) / 2.0, (h - gh) / 2.0);
     pangocairo::functions::show_layout(cr, &glyph);

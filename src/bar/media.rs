@@ -151,7 +151,7 @@ fn draw_thumb(cr: &gtk::cairo::Context, w: f64, h: f64, art: Option<&ImageSurfac
         }
         None => {
             let layout = pangocairo::functions::create_layout(cr);
-            let style = TextStyle { family: crate::config::ICON_FONT, ..TextStyle::new(10.0 * s, pango::Weight::Medium, ICON_DIM) };
+            let style = TextStyle { family: crate::config::get().icon_font.as_str(), ..TextStyle::new(10.0 * s, pango::Weight::Medium, ICON_DIM) };
             layout.set_text("music_note");
             layout.set_attributes(Some(&style.attrs()));
             let (_, logical) = layout.pixel_extents();

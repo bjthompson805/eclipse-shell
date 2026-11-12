@@ -17,7 +17,9 @@ use crate::config;
 use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, DIM, FAINT, MOON_DISC, MOON_GLOW, NIGHT_GHOST, SHEEN, SUBTLE, SUN_GOLD};
 use crate::weather::{self, Weather};
 
-const CARD_RADIUS: f64 = config::LAUNCHER_RADIUS - 4.0;
+fn card_radius() -> f64 {
+    config::get().launcher_radius - 4.0
+}
 const BREATH_MS: f64 = 620.0;
 const DRIFT_MS: f64 = 900.0;
 
@@ -66,7 +68,7 @@ fn clock_column(s: f64) -> gtk::Box {
 
     let greeting = TextStyle::new(9.0 * s, pango::Weight::Semibold, SUBTLE).tracking(1.6 * s).label("");
     greeting.set_halign(gtk::Align::Start);
-    greeting.set_visible(config::LAUNCHER_GREETING);
+    greeting.set_visible(config::get().launcher_greeting);
 
     let digits = TextStyle::new(34.0 * s, pango::Weight::Medium, BRIGHT).mono();
     let hours = digits.label("");
@@ -76,7 +78,7 @@ fn clock_column(s: f64) -> gtk::Box {
     meridiem.set_valign(gtk::Align::Start);
     meridiem.set_margin_start((5.0 * s).round() as i32);
     meridiem.set_margin_top((22.0 * s).round() as i32);
-    meridiem.set_visible(!config::CLOCK_24H);
+    meridiem.set_visible(!config::get().clock_24h);
 
     let time = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     for part in [&hours, &colon, &minutes, &meridiem] {
@@ -95,7 +97,7 @@ fn clock_column(s: f64) -> gtk::Box {
 
     every_second(&column, move |now| {
         let hour = now.hour();
-        let shown_hour = if config::CLOCK_24H { hour } else { (hour + 11) % 12 + 1 };
+        let shown_hour = if config::get().clock_24h { hour } else { (hour + 11) % 12 + 1 };
         hours.set_text(&format!("{shown_hour:02}"));
         minutes.set_text(&format!("{:02}", now.minute()));
         meridiem.set_text(if hour < 12 { "AM" } else { "PM" });
@@ -144,7 +146,7 @@ fn weather_column(s: f64) -> gtk::Box {
         let (glyph, temp, date_headline, place, date, headline) = (glyph.clone(), temp.clone(), date_headline.clone(), place.clone(), date.clone(), headline.clone());
         move || {
             let today = glib::DateTime::now_local().ok().and_then(|t| t.format("%A, %b %-d").ok()).map(String::from).unwrap_or_default();
-            let shown: Option<Weather> = weather::current().filter(|_| config::LAUNCHER_WEATHER);
+            let shown: Option<Weather> = weather::current().filter(|_| config::get().launcher_weather);
             headline.set_visible(shown.is_some());
             place.set_visible(shown.is_some());
             date.set_visible(shown.is_some());
@@ -174,7 +176,7 @@ fn sky_colour(is_day: bool) -> Rgba {
 fn draw(cr: &cairo::Context, w: f64, h: f64, s: f64) {
     let palette = theme::palette();
     // Inset half a pixel so the 1px outline lands on whole pixels.
-    let outline = || theme::squircle(cr, 0.5, 0.5, w - 1.0, h - 1.0, CARD_RADIUS);
+    let outline = || theme::squircle(cr, 0.5, 0.5, w - 1.0, h - 1.0, card_radius());
     outline();
     theme::set_source(cr, palette.recessed);
     let _ = cr.fill_preserve();
@@ -182,7 +184,7 @@ fn draw(cr: &cairo::Context, w: f64, h: f64, s: f64) {
     cr.clip();
 
     // A lit hairline along the top edge, between the corners.
-    cr.rectangle(CARD_RADIUS * s, 1.0, w - 2.0 * CARD_RADIUS * s, 1.0);
+    cr.rectangle(card_radius() * s, 1.0, w - 2.0 * card_radius() * s, 1.0);
     theme::set_source(cr, SHEEN);
     let _ = cr.fill();
 

@@ -90,8 +90,8 @@ pub struct Bar {
 impl Bar {
     pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, actions: &Rc<Actions>) -> Self {
         let s = config::bar_scale(monitor.geometry().height());
-        let band = config::BAR_HEIGHT * s;
-        let top = config::FRAME_EDGE + band;
+        let band = config::get().bar_height * s;
+        let top = config::get().frame_edge + band;
 
         let reserve = layer_window(app, monitor, "eclipse-shell-reserve");
         reserve.set_layer(Layer::Top);
@@ -284,10 +284,10 @@ fn set_input_rect(window: &impl IsA<gtk::Native>, width: i32, height: i32) {
 /// hole, an edge line around the hole, and a shadow falling into it.
 fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
     let palette = theme::palette();
-    let edge = config::FRAME_EDGE;
+    let edge = config::get().frame_edge;
     let (hx, hy, hw, hh) = (edge, top, w - 2.0 * edge, h - top - edge);
     let hole = |cr: &cairo::Context, inset: f64| {
-        theme::rounded_rect(cr, hx + inset, hy + inset, hw - 2.0 * inset, hh - 2.0 * inset, (config::FRAME_RADIUS - inset).max(0.0));
+        theme::rounded_rect(cr, hx + inset, hy + inset, hw - 2.0 * inset, hh - 2.0 * inset, (config::get().frame_radius - inset).max(0.0));
     };
 
     cr.set_fill_rule(cairo::FillRule::EvenOdd);
@@ -299,18 +299,18 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
     let _ = cr.save();
     hole(cr, 0.0);
     cr.clip();
-    let size = config::SHADOW_SIZE;
+    let size = config::get().shadow_size;
     cr.set_line_width(1.0);
     for step in 0..size as i32 {
         let falloff = 1.0 - f64::from(step) / size;
         hole(cr, f64::from(step) + 0.5);
-        cr.set_source_rgba(0.0, 0.0, 0.0, config::SHADOW_STRENGTH * 0.35 * falloff * falloff);
+        cr.set_source_rgba(0.0, 0.0, 0.0, config::get().shadow_strength * 0.35 * falloff * falloff);
         let _ = cr.stroke();
     }
     let _ = cr.restore();
 
     hole(cr, 0.0);
-    cr.set_line_width(config::FRAME_BORDER_WIDTH);
+    cr.set_line_width(config::get().frame_border_width);
     theme::set_source(cr, palette.edge);
     let _ = cr.stroke();
 }
@@ -345,7 +345,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     let left = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_start(edge_margin).build();
     left.append(&mark.widget);
     left.append(&spaces.widget);
-    if config::BAR_STATS {
+    if config::get().bar_stats {
         let stats = Module::new(&stats::stats(s), pill(6.0 * s));
         stats.connect_tapped({
             let (widget, actions) = (stats.widget.downgrade(), actions.clone());
@@ -358,7 +358,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         left.append(&stats.widget);
         anchors.stats = Some(stats.widget.upcast());
     }
-    anchors.usage = config::BAR_AGENT_USAGE.then(|| {
+    anchors.usage = config::get().bar_agent_usage.then(|| {
         let usage = Module::new(&agent_usage::agent_usage(s), pill(6.0 * s));
         usage.connect_tapped({
             let (widget, actions) = (usage.widget.downgrade(), actions.clone());
@@ -412,7 +412,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     });
 
     let right = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_end(edge_margin).build();
-    if config::BAR_MEDIA {
+    if config::get().bar_media {
         let playing = media::media(s);
         let media = Module::new(&playing, pill(12.0 * s));
         media.connect_tapped({
@@ -441,7 +441,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         anchors.media = Some(media.widget.clone().upcast());
         right.append(&media.widget);
     }
-    if config::BAR_NET_SPEED {
+    if config::get().bar_net_speed {
         let speed = Module::new(&net_speed::net_speed(s), pill(6.0 * s));
         speed.connect_tapped({
             let (actions, pill) = (actions.clone(), speed.widget.downgrade());
@@ -454,7 +454,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         anchors.traffic = Some(speed.widget.clone().upcast());
         right.append(&speed.widget);
     }
-    if config::BAR_STATUS {
+    if config::get().bar_status {
         let cluster = status::status(s, actions);
         // Volume, the sun, network and Bluetooth lead the cluster; the battery ends it.
         anchors.volume = cluster.first_child();
@@ -465,7 +465,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let status = Module::new(&cluster, ModuleSpec { interactive: false, ..pill(8.0 * s) });
         right.append(&status.widget);
     }
-    if config::BAR_WEATHER {
+    if config::get().bar_weather {
         let reading = weather::weather(s);
         let weather = Module::new(&reading, pill(12.0 * s));
         weather.connect_tapped({
@@ -481,7 +481,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         reading.bind_property("visible", &weather.widget, "visible").sync_create().build();
         right.append(&weather.widget);
     }
-    if config::BAR_TRAY {
+    if config::get().bar_tray {
         let icons = tray::tray(s, hints, hint_y);
         let tray = Module::new(&icons, ModuleSpec { interactive: false, ..pill(11.0 * s) });
         icons.bind_property("visible", &tray.widget, "visible").sync_create().build();

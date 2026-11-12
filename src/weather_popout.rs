@@ -193,7 +193,7 @@ fn compass(from: f64) -> &'static str {
 /// "6:56 AM", or "06:56" on a 24-hour clock.
 fn clock(seconds: i32) -> String {
     let (h, m) = (seconds / 3600, seconds / 60 % 60);
-    if config::CLOCK_24H {
+    if config::get().clock_24h {
         return format!("{h:02}:{m:02}");
     }
     format!("{}:{m:02} {}", (h + 11) % 12 + 1, if h < 12 { "AM" } else { "PM" })
@@ -201,7 +201,7 @@ fn clock(seconds: i32) -> String {
 
 /// "3p", "12a", or "15" on a 24-hour clock.
 fn hour_label(hour: u32) -> String {
-    if config::CLOCK_24H {
+    if config::get().clock_24h {
         return format!("{hour:02}");
     }
     format!("{}{}", (hour + 11) % 12 + 1, if hour < 12 { "a" } else { "p" })
@@ -287,7 +287,7 @@ fn draw_hourly(cr: &cairo::Context, w: f64, hours: &[Hour], s: f64) {
         let now = i == 0;
         let hour = if now { "Now".to_owned() } else { hour_label(h.hour) };
         text(cr, &hour, TextStyle::new(9.5 * s, pango::Weight::Semibold, if now { CREAM } else { DIM }).mono(), x, 0.0);
-        let glyph = TextStyle { family: config::ICON_FONT, ..TextStyle::new(16.0 * s, pango::Weight::Medium, if h.day { SUBTLE } else { ICON_DIM }) };
+        let glyph = TextStyle { family: config::get().icon_font.as_str(), ..TextStyle::new(16.0 * s, pango::Weight::Medium, if h.day { SUBTLE } else { ICON_DIM }) };
         text(cr, h.glyph.symbol_at(h.day), glyph, x, 17.0 * s);
         text(cr, &degrees(h.temp), TextStyle::new(10.0 * s, pango::Weight::Semibold, CREAM), x, y - 18.0 * s);
         cr.arc(x, y, if now { 3.5 * s } else { 2.5 * s }, 0.0, 2.0 * PI);
@@ -315,7 +315,7 @@ fn text(cr: &cairo::Context, s: &str, style: TextStyle, x: f64, y: f64) {
     let layout = pangocairo::functions::create_layout(cr);
     layout.set_text(s);
     let attrs = style.attrs();
-    if style.family == config::ICON_FONT {
+    if style.family == config::get().icon_font.as_str() {
         let mut font = style.font();
         font.set_variations(Some("FILL=1,opsz=20"));
         attrs.insert(pango::AttrFontDesc::new(&font));

@@ -1,5 +1,5 @@
-//! Window chrome for the shell's own apps (the wallpaper browser, and the
-//! hub to come). They're undecorated, so they draw their own close button.
+//! Shared pieces of the shell's own app windows (the wallpaper browser and
+//! the hub). They're undecorated, so they draw their own close button.
 
 use std::cell::Cell;
 use std::rc::Rc;

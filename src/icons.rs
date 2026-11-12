@@ -17,7 +17,7 @@ thread_local! {
 /// match everywhere.
 pub fn use_desktop_theme() {
     if let Some(settings) = gtk::Settings::default() {
-        settings.set_gtk_icon_theme_name(Some(config::ICON_THEME));
+        settings.set_gtk_icon_theme_name(Some(config::get().icon_theme.as_str()));
     }
 }
 
