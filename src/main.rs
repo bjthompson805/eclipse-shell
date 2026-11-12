@@ -6,6 +6,7 @@ mod icons;
 mod launcher;
 mod mark;
 mod media;
+mod power;
 mod theme;
 mod tray;
 mod weather;
@@ -20,6 +21,7 @@ use gtk4 as gtk;
 use bar::Bar;
 use hyprland::State;
 use launcher::Launcher;
+use power::Power;
 
 /// GTK windows paint a theme background by default; this is the one rule
 /// needed to let the drawn surfaces show through.
@@ -29,6 +31,7 @@ struct Shell {
     bars: Vec<Bar>,
     state: State,
     launcher: Rc<Launcher>,
+    power: Rc<Power>,
 }
 
 impl Shell {
@@ -36,7 +39,9 @@ impl Shell {
         for bar in &self.bars {
             bar.update(&self.state);
         }
-        self.launcher.set_monitor(monitor_named(display, self.state.focused_monitor.as_deref()));
+        let focused = monitor_named(display, self.state.focused_monitor.as_deref());
+        self.launcher.set_monitor(focused.clone());
+        self.power.set_monitor(focused);
     }
 }
 
@@ -60,15 +65,23 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
     }
     let launcher = shell_ref.launcher.clone();
     let toggle: Rc<dyn Fn()> = Rc::new(move || launcher.toggle());
+    let power = shell_ref.power.clone();
+    let toggle_power: Rc<dyn Fn()> = Rc::new(move || power.toggle());
     let monitors = display.monitors();
     shell_ref.bars = (0..monitors.n_items())
         .filter_map(|i| monitors.item(i).and_downcast::<gdk::Monitor>())
-        .map(|monitor| Bar::new(app, &monitor, toggle.clone()))
+        .map(|monitor| Bar::new(app, &monitor, toggle.clone(), toggle_power.clone()))
         .collect();
     shell_ref.refresh(display);
 }
 
-fn start(app: &gtk::Application) -> Option<Rc<Launcher>> {
+/// The shell's on-demand surfaces, reachable from the command line.
+struct Surfaces {
+    launcher: Rc<Launcher>,
+    power: Rc<Power>,
+}
+
+fn start(app: &gtk::Application) -> Option<Surfaces> {
     let Some(display) = gdk::Display::default() else {
         eprintln!("eclipse-shell: no display");
         return None;
@@ -88,7 +101,8 @@ fn start(app: &gtk::Application) -> Option<Rc<Launcher>> {
     media::start();
 
     let launcher = Launcher::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone() }));
+    let power = Power::new(app);
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -105,7 +119,7 @@ fn start(app: &gtk::Application) -> Option<Rc<Launcher>> {
         }
     });
 
-    Some(launcher)
+    Some(Surfaces { launcher, power })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -117,13 +131,13 @@ fn main() -> glib::ExitCode {
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
 
-    let launcher: Rc<OnceCell<Rc<Launcher>>> = Rc::default();
+    let surfaces: Rc<OnceCell<Surfaces>> = Rc::default();
     app.connect_activate({
-        let launcher = launcher.clone();
+        let surfaces = surfaces.clone();
         move |app| {
-            if launcher.get().is_none() {
+            if surfaces.get().is_none() {
                 if let Some(started) = start(app) {
-                    let _ = launcher.set(started);
+                    let _ = surfaces.set(started);
                 }
             }
         }
@@ -134,8 +148,13 @@ fn main() -> glib::ExitCode {
         match args.get(1).and_then(|arg| arg.to_str()) {
             None => {}
             Some("toggle-launcher") => {
-                if let Some(launcher) = launcher.get() {
-                    launcher.toggle();
+                if let Some(surfaces) = surfaces.get() {
+                    surfaces.launcher.toggle();
+                }
+            }
+            Some("toggle-power") => {
+                if let Some(surfaces) = surfaces.get() {
+                    surfaces.power.toggle();
                 }
             }
             Some(other) => {

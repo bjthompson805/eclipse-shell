@@ -91,6 +91,11 @@ pub fn focus_workspace(id: i32) {
     command("switching workspace", &format!("dispatch hl.dsp.focus({{ workspace = {id} }})"));
 }
 
+/// Ends the Hyprland session.
+pub fn exit() {
+    command("exiting", "dispatch hl.dsp.exit()");
+}
+
 /// Evaluates Lua against the running Hyprland config.
 pub fn eval(lua: &str) {
     command("hyprland eval", &format!("eval {lua}"));

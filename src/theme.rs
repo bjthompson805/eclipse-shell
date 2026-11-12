@@ -369,3 +369,17 @@ pub fn squircle(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
     }
     cr.close_path();
 }
+
+/// Copies a texture into a cairo surface (premultiplied BGRA, which is
+/// cairo's ARGB32 on little-endian machines).
+pub fn texture_surface(texture: &gtk::gdk::Texture) -> Option<cairo::ImageSurface> {
+    let (w, h) = (texture.width(), texture.height());
+    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h).ok()?;
+    let stride = surface.stride() as usize;
+    {
+        let mut data = surface.data().ok()?;
+        texture.download(&mut data, stride);
+    }
+    surface.mark_dirty();
+    Some(surface)
+}

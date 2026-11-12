@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::cairo::{Format, ImageSurface};
+use gtk::cairo::ImageSurface;
 use gtk::{gdk, gio, glib, pango};
 use gtk4 as gtk;
 
@@ -175,7 +175,7 @@ fn load_art(url: &str, art: &Rc<RefCell<Option<ImageSurface>>>, thumb: &gtk::Dra
     glib::spawn_future_local(async move {
         let Ok((bytes, _)) = gio::File::for_uri(&url).load_bytes_future().await else { return };
         let Ok(texture) = gdk::Texture::from_bytes(&bytes) else { return };
-        let Some(surface) = to_surface(&texture) else { return };
+        let Some(surface) = theme::texture_surface(&texture) else { return };
         *art.borrow_mut() = Some(surface);
         if let Some(thumb) = thumb.upgrade() {
             thumb.queue_draw();
@@ -183,16 +183,3 @@ fn load_art(url: &str, art: &Rc<RefCell<Option<ImageSurface>>>, thumb: &gtk::Dra
     });
 }
 
-/// Copies a texture into a cairo surface (premultiplied BGRA, which is
-/// cairo's ARGB32 on little-endian machines).
-fn to_surface(texture: &gdk::Texture) -> Option<ImageSurface> {
-    let (w, h) = (texture.width(), texture.height());
-    let mut surface = ImageSurface::create(Format::ARgb32, w, h).ok()?;
-    let stride = surface.stride() as usize;
-    {
-        let mut data = surface.data().ok()?;
-        texture.download(&mut data, stride);
-    }
-    surface.mark_dirty();
-    Some(surface)
-}

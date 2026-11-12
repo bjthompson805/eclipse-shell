@@ -42,7 +42,7 @@ pub struct Bar {
 }
 
 impl Bar {
-    pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, on_mark: Rc<dyn Fn()>) -> Self {
+    pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>) -> Self {
         let s = config::bar_scale(monitor.geometry().height());
         let band = config::BAR_HEIGHT * s;
         let top = config::FRAME_EDGE + band;
@@ -85,7 +85,7 @@ impl Bar {
 
         let workspaces = Workspaces::new(s);
         let title = Title::new(s);
-        let content = band_content(s, band, &workspaces, &title, on_mark);
+        let content = band_content(s, band, &workspaces, &title, on_mark, on_power);
         content.set_size_request(-1, top.round() as i32);
 
         let layers = gtk::Overlay::new();
@@ -164,7 +164,7 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>) -> gtk::Overlay {
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>) -> gtk::Overlay {
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
     let pill = |pad_x: f64| ModuleSpec { span, pad_x, filled: true, interactive: true, square: false };
@@ -200,6 +200,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         }
     });
     let power = Module::new(&power_icon, pill(10.0 * s));
+    power.connect_tapped(move || on_power());
 
     let right = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_end(edge_margin).build();
     if config::BAR_MEDIA {
