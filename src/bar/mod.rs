@@ -48,6 +48,7 @@ pub struct Actions {
     pub bluetooth: Rc<dyn Fn(f64)>,
     pub media: Rc<dyn Fn(f64)>,
     pub weather: Rc<dyn Fn(f64)>,
+    pub traffic: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
@@ -64,6 +65,7 @@ struct Anchors {
     bluetooth: Option<gtk::Widget>,
     media: Option<gtk::Widget>,
     weather: Option<gtk::Widget>,
+    traffic: Option<gtk::Widget>,
     battery: Option<gtk::Widget>,
 }
 
@@ -186,6 +188,11 @@ impl Bar {
     /// Where the weather pill's centre sits, if the bar shows it.
     pub fn weather_x(&self) -> Option<f64> {
         self.anchors.weather.as_ref().filter(|w| w.is_visible()).and_then(centre_x)
+    }
+
+    /// Where the net-speed readout's centre sits, if the bar shows it.
+    pub fn traffic_x(&self) -> Option<f64> {
+        centre_x(self.anchors.traffic.as_ref()?)
     }
 
     /// Where the battery's centre sits, if the bar shows it.
@@ -393,7 +400,16 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         right.append(&media.widget);
     }
     if config::BAR_NET_SPEED {
-        let speed = Module::new(&net_speed::net_speed(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
+        let speed = Module::new(&net_speed::net_speed(s), pill(6.0 * s));
+        speed.connect_tapped({
+            let (actions, pill) = (actions.clone(), speed.widget.downgrade());
+            move || {
+                if let Some(x) = pill.upgrade().and_then(|p| centre_x(p.upcast_ref())) {
+                    (actions.traffic)(x);
+                }
+            }
+        });
+        anchors.traffic = Some(speed.widget.clone().upcast());
         right.append(&speed.widget);
     }
     if config::BAR_STATUS {

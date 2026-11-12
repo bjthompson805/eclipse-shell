@@ -83,6 +83,7 @@ dependencies = [
  "gio-unix",
  "gtk4",
  "gtk4-layer-shell",
+ "libc",
  "pangocairo",
  "serde",
  "serde_json",
