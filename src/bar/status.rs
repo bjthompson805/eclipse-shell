@@ -66,7 +66,8 @@ impl Battery {
     }
 }
 
-pub fn status(s: f64) -> gtk::Box {
+/// `on_battery` opens the battery popout under the given x.
+pub fn status(s: f64, on_battery: Rc<dyn Fn(f64)>) -> gtk::Box {
     let glyph_px = 14.0 * s;
     let slot = (glyph_px + 4.0 * s).round() as i32;
     let row = gtk::Box::new(gtk::Orientation::Horizontal, (9.0 * s).round() as i32);
@@ -87,6 +88,14 @@ pub fn status(s: f64) -> gtk::Box {
     battery_row.append(&battery);
     battery_row.append(&battery_pct);
     row.append(&battery_row);
+    battery_row.set_cursor_from_name(Some("pointer"));
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |gesture, _, _, _| {
+        if let Some(x) = gesture.widget().and_then(|w| super::centre_x(&w)) {
+            on_battery(x);
+        }
+    });
+    battery_row.add_controller(click);
 
     let reading = Rc::new(RefCell::new(Reading::default()));
     sun.set_draw_func({

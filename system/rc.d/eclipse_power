@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# PROVIDE: eclipse_power
+# REQUIRE: LOGIN powerd
+# KEYWORD: shutdown
+#
+# Puts eclipse-shell's power settings back at boot (the CPU energy preference
+# for the powerd profile, and the battery charge limit, which the firmware
+# forgets at power-off), and lifts the limit to full at shutdown when asked to.
+#
+# SPDX-License-Identifier: BSD-2-Clause
+
+. /etc/rc.subr
+
+name=eclipse_power
+rcvar=eclipse_power_enable
+start_cmd="${name}_start"
+stop_cmd="${name}_stop"
+
+eclipse_power_start()
+{
+	/usr/local/libexec/eclipse-priv power-profile apply || :
+	/usr/local/libexec/eclipse-priv charge-limit apply || :
+}
+
+eclipse_power_stop()
+{
+	/usr/local/libexec/eclipse-priv charge-limit release || :
+}
+
+load_rc_config $name
+: "${eclipse_power_enable:=NO}"
+run_rc_command "$1"

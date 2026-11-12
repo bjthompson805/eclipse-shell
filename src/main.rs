@@ -1,6 +1,7 @@
 mod agent_usage;
 mod anim;
 mod bar;
+mod battery_popout;
 mod calendar;
 mod config;
 mod hyprland;
@@ -23,6 +24,7 @@ use gtk::{gdk, gio, glib};
 use gtk4 as gtk;
 
 use bar::{Actions, Bar};
+use battery_popout::BatteryPopout;
 use calendar::Calendar;
 use hyprland::State;
 use launcher::Launcher;
@@ -40,6 +42,7 @@ struct Shell {
     power: Rc<Power>,
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
+    battery: Rc<BatteryPopout>,
 }
 
 impl Shell {
@@ -51,7 +54,8 @@ impl Shell {
         self.launcher.set_monitor(focused.clone());
         self.power.set_monitor(focused.clone());
         self.calendar.set_monitor(focused.clone());
-        self.usage.set_monitor(focused);
+        self.usage.set_monitor(focused.clone());
+        self.battery.set_monitor(focused);
     }
 }
 
@@ -74,11 +78,13 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         bar.destroy();
     }
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
+    let battery = shell_ref.battery.clone();
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
         power: Rc::new(move || power.toggle()),
         calendar: Rc::new(move |x| calendar.toggle(x)),
         usage: Rc::new(move |x| usage.toggle(x)),
+        battery: Rc::new(move |x| battery.toggle(x)),
     });
     let monitors = display.monitors();
     shell_ref.bars = (0..monitors.n_items())
@@ -94,6 +100,7 @@ struct Surfaces {
     power: Rc<Power>,
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
+    battery: Rc<BatteryPopout>,
     shell: Rc<RefCell<Shell>>,
 }
 
@@ -121,7 +128,8 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let power = Power::new(app);
     let calendar = Calendar::new(app);
     let usage = UsagePopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone() }));
+    let battery = BatteryPopout::new(app);
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), battery: battery.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -141,7 +149,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, shell })
+    Some(Surfaces { launcher, power, calendar, usage, battery, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -193,6 +201,16 @@ fn main() -> glib::ExitCode {
                     let bar = shell.bars.iter().find(|b| b.connector.as_deref() == focused).or(shell.bars.first());
                     if let Some(x) = bar.and_then(Bar::usage_x) {
                         surfaces.usage.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-battery") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    let focused = shell.state.focused_monitor.as_deref();
+                    let bar = shell.bars.iter().find(|b| b.connector.as_deref() == focused).or(shell.bars.first());
+                    if let Some(x) = bar.and_then(Bar::battery_x) {
+                        surfaces.battery.toggle(x);
                     }
                 }
             }

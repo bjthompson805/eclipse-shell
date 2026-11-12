@@ -1,0 +1,158 @@
+#!/bin/sh
+# eclipse-priv: the few root actions eclipse-shell needs. Installed at
+# /usr/local/libexec/eclipse-priv, owned by root, with a sudo rule letting the
+# desktop user run this file (and nothing else) without a password. Every
+# argument is matched against a fixed list before it reaches a command.
+#
+#   eclipse-priv power-profile saver|balanced|performance
+#       Set powerd's modes on AC and battery (kept in rc.conf) and the AMD
+#       CPPC energy preference to match.
+#   eclipse-priv power-profile apply
+#       Set the energy preference again for the profile in rc.conf (boot).
+#   eclipse-priv charge-limit on|off
+#   eclipse-priv charge-limit set <5-100>
+#   eclipse-priv charge-limit full-when-off on|off
+#       The battery charge limit, through ASUS firmware. Settings live in
+#       /var/db/eclipse-charge-limit, readable by everyone.
+#   eclipse-priv charge-limit probe|apply|release
+#       Check for support; write the limit (boot); lift it to 100% before
+#       power-off if full-when-off is on (shutdown).
+#
+# SPDX-License-Identifier: BSD-2-Clause
+set -eu
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+
+usage() {
+	sed -n '6,20p' "$0" >&2
+	exit 2
+}
+
+# ---- power profile -----------------------------------------------------------
+
+# powerd flags per profile. "balanced" is powerd's default (hiadaptive on AC,
+# adaptive on battery). eclipse-shell reads these exact strings back.
+profile_flags() {
+	case "$1" in
+	saver) echo "-a adaptive -b minimum" ;;
+	balanced) echo "" ;;
+	performance) echo "-a maximum -b hiadaptive" ;;
+	esac
+}
+
+# The AMD CPPC energy/performance preference: 0 favours speed, 255 power.
+set_epp() {
+	case "$(sysrc -n powerd_flags 2>/dev/null)" in
+	"$(profile_flags saver)") epp=192 ;;
+	"$(profile_flags performance)") epp=0 ;;
+	*) epp=128 ;;
+	esac
+	for cpu in $(sysctl -N dev.hwpstate_amd 2>/dev/null | sed -n 's/^dev\.hwpstate_amd\.\([0-9][0-9]*\)\.epp$/\1/p'); do
+		sysctl -q "dev.hwpstate_amd.$cpu.epp=$epp" >/dev/null || :
+	done
+}
+
+power_profile() {
+	case "$1" in
+	saver | balanced | performance)
+		sysrc -q powerd_enable=YES powerd_flags="$(profile_flags "$1")" >/dev/null
+		service powerd restart >/dev/null 2>&1 || service powerd start >/dev/null
+		set_epp
+		;;
+	apply) set_epp ;;
+	*) usage ;;
+	esac
+}
+
+# ---- charge limit ------------------------------------------------------------
+
+# ASUS laptops take the limit through the ATK WMI method: the "DEVS" call sets
+# a device's value, "DSTS" asks for its status. The battery charge limit is
+# device 0x00120057. The firmware forgets the limit at power-off, so the
+# setting is kept here and boot writes it again.
+STATE=/var/db/eclipse-charge-limit
+WMI_METHOD='\_SB.ATKD.WMNB'
+WMI_DSTS=0x53545344
+WMI_DEVS=0x53564544
+LIMIT_DEVICE=00120057
+
+# setting <key> <default>
+setting() {
+	value=$(awk -v key="$1" '$1 == key { print $2 }' "$STATE" 2>/dev/null) || value=
+	echo "${value:-$2}"
+}
+
+# remember <key> <value>: rewrite the state file with one setting changed.
+remember() {
+	supported=$(setting supported false)
+	enabled=$(setting enabled false)
+	end=$(setting end 80)
+	full_when_off=$(setting full_when_off false)
+	case "$1" in
+	supported) supported=$2 ;;
+	enabled) enabled=$2 ;;
+	end) end=$2 ;;
+	full_when_off) full_when_off=$2 ;;
+	esac
+	printf 'supported %s\nenabled %s\nend %s\nfull_when_off %s\n' \
+		"$supported" "$enabled" "$end" "$full_when_off" >"$STATE.new"
+	chmod 644 "$STATE.new"
+	mv -f "$STATE.new" "$STATE"
+}
+
+# wmi <method id> <value 0-255>: one call on the limit device; prints the
+# firmware's answer. The buffer carries the device id, little-endian, then
+# the value.
+wmi() {
+	kldload -n acpi_call 2>/dev/null || return 1
+	device_le=$(echo "$LIMIT_DEVICE" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/')
+	buffer=$(printf '%s%02x%030d' "$device_le" "$2" 0)
+	acpi_call -p "$WMI_METHOD" -i 0 -i "$(($1))" -b "$buffer" -o i 2>/dev/null
+}
+
+# write_limit <percent>: the firmware answers 1 when it takes it.
+write_limit() {
+	[ "$(setting supported false)" = true ] || { echo "this battery has no charge limit" >&2; exit 1; }
+	[ "$(wmi "$WMI_DEVS" "$1")" = 1 ] || { echo "the firmware refused the charge limit" >&2; exit 1; }
+}
+
+charge_limit() {
+	case "$1 ${2:-}" in
+	"probe ")
+		if [ "$(wmi "$WMI_DSTS" 0)" = 1 ]; then remember supported true; else remember supported false; fi
+		;;
+	"on ")
+		write_limit "$(setting end 80)"
+		remember enabled true
+		;;
+	"off ")
+		write_limit 100
+		remember enabled false
+		;;
+	"set "*)
+		case "$2" in
+		[5-9] | [1-9][0-9] | 100) ;;
+		*) echo "the limit must be 5 to 100" >&2; exit 2 ;;
+		esac
+		if [ "$(setting enabled false)" = true ]; then write_limit "$2"; fi
+		remember end "$2"
+		;;
+	"full-when-off on") remember full_when_off true ;;
+	"full-when-off off") remember full_when_off false ;;
+	"apply ")
+		if [ "$(setting enabled false)" = true ]; then write_limit "$(setting end 80)"; fi
+		;;
+	"release ")
+		if [ "$(setting enabled false)" = true ] && [ "$(setting full_when_off false)" = true ]; then
+			write_limit 100
+		fi
+		;;
+	*) usage ;;
+	esac
+}
+
+[ $# -ge 2 ] && [ $# -le 3 ] || usage
+case "$1" in
+power-profile) [ $# -eq 2 ] || usage; power_profile "$2" ;;
+charge-limit) shift; charge_limit "$@" ;;
+*) usage ;;
+esac

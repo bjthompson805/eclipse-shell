@@ -41,6 +41,7 @@ pub struct Actions {
     pub power: Rc<dyn Fn()>,
     pub calendar: Rc<dyn Fn(f64)>,
     pub usage: Rc<dyn Fn(f64)>,
+    pub battery: Rc<dyn Fn(f64)>,
 }
 
 pub struct Bar {
@@ -50,6 +51,7 @@ pub struct Bar {
     title: Rc<Title>,
     clock: gtk::Widget,
     usage: Option<gtk::Widget>,
+    battery: Option<gtk::Widget>,
 }
 
 impl Bar {
@@ -96,7 +98,7 @@ impl Bar {
 
         let workspaces = Workspaces::new(s);
         let title = Title::new(s);
-        let (content, usage) = band_content(s, band, &workspaces, &title, actions);
+        let (content, usage, battery) = band_content(s, band, &workspaces, &title, actions);
         content.set_size_request(-1, top.round() as i32);
 
         let layers = gtk::Overlay::new();
@@ -108,7 +110,7 @@ impl Bar {
         frame.present();
         // The clock floats as the band's last overlay.
         let clock = content.last_child().expect("clock");
-        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title, clock, usage }
+        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title, clock, usage, battery }
     }
 
     pub fn update(&self, state: &State) {
@@ -119,6 +121,11 @@ impl Bar {
     /// Where the clock's centre sits, in logical px from the monitor's left.
     pub fn clock_x(&self) -> Option<f64> {
         centre_x(&self.clock)
+    }
+
+    /// Where the battery's centre sits, if the bar shows it.
+    pub fn battery_x(&self) -> Option<f64> {
+        self.battery.as_ref().filter(|b| b.is_visible()).and_then(centre_x)
     }
 
     /// Where the usage readout's centre sits, if the bar shows it.
@@ -135,7 +142,7 @@ impl Bar {
 
 /// A widget's horizontal centre in its window. The bar's surface spans the
 /// monitor, so that is also its distance from the monitor's left edge.
-fn centre_x(widget: &gtk::Widget) -> Option<f64> {
+pub(super) fn centre_x(widget: &gtk::Widget) -> Option<f64> {
     let root = widget.root()?;
     let point = widget.compute_point(&root, &gtk::graphene::Point::new(widget.width() as f32 / 2.0, 0.0))?;
     Some(f64::from(point.x()))
@@ -209,7 +216,7 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>) -> (gtk::Overlay, Option<gtk::Widget>) {
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>) -> (gtk::Overlay, Option<gtk::Widget>, Option<gtk::Widget>) {
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
     let pill = |pad_x: f64| ModuleSpec { span, pad_x, filled: true, interactive: true, square: false };
@@ -290,8 +297,12 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let speed = Module::new(&net_speed::net_speed(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
         right.append(&speed.widget);
     }
+    let mut battery_widget = None;
     if config::BAR_STATUS {
-        let status = Module::new(&status::status(s), ModuleSpec { interactive: false, ..pill(8.0 * s) });
+        let cluster = status::status(s, actions.battery.clone());
+        // The battery is the cluster's last glyph.
+        battery_widget = cluster.last_child();
+        let status = Module::new(&cluster, ModuleSpec { interactive: false, ..pill(8.0 * s) });
         right.append(&status.widget);
     }
     if config::BAR_WEATHER {
@@ -328,5 +339,5 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let x = (width / 2 - cw / 2).min(highest).max(lowest);
         Some(gdk::Rectangle::new(x, 0, cw, height))
     });
-    (content, usage_widget)
+    (content, usage_widget, battery_widget)
 }
