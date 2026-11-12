@@ -23,7 +23,7 @@ const NAMESPACE: &str = "eclipse-shell-display";
 const TICK: Duration = Duration::from_secs(1);
 const WIDTH: f64 = 300.0;
 /// The dimmest the panel goes, so it never turns off outright.
-const MIN_BRIGHTNESS: f64 = 0.05;
+pub const MIN_BRIGHTNESS: f64 = 0.05;
 const NEUTRAL_VIBRANCE: u32 = 50;
 
 pub struct DisplayPopout {
@@ -114,14 +114,14 @@ pub fn restore() {
     }
 }
 
-async fn read_brightness() -> Option<f64> {
+pub async fn read_brightness() -> Option<f64> {
     let process = gio::Subprocess::newv(&["backlight".as_ref(), "-q".as_ref()], gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_SILENCE).ok()?;
     let (stdout, _) = process.communicate_utf8_future(None).await.ok()?;
     let percent: f64 = stdout?.trim().parse().ok()?;
     Some(percent / 100.0)
 }
 
-fn set_brightness(value: f64) {
+pub fn set_brightness(value: f64) {
     let percent = (value * 100.0).round().to_string();
     if let Ok(p) = gio::Subprocess::newv(&["backlight".as_ref(), percent.as_ref()], gio::SubprocessFlags::STDOUT_SILENCE | gio::SubprocessFlags::STDERR_SILENCE) {
         p.wait_async(gio::Cancellable::NONE, |_| {});

@@ -51,7 +51,7 @@ pub struct Profile {
 
 impl Profile {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
-        let sidebar = Sidebar::new(app, Side::Left, "eclipse-shell-profile");
+        let sidebar = Sidebar::new(app, Side::Left, "eclipse-shell-profile", 340.0);
         let profile = Rc::new(Self { sidebar, facts: RefCell::default(), updaters: RefCell::default(), open: Cell::new(false) });
         profile.sidebar.connect_open({
             let profile = Rc::downgrade(&profile);

@@ -36,7 +36,12 @@ pub struct WeatherPopout {
 
 impl WeatherPopout {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
-        Rc::new(Self { popout: Popout::new(app, NAMESPACE), generation: Cell::new(0) })
+        Self::with_popout(Popout::new(app, NAMESPACE))
+    }
+
+    /// Shown on `host`, e.g. a [`Popout::pane`] in a sidebar.
+    pub fn with_popout(host: Rc<Popout>) -> Rc<Self> {
+        Rc::new(Self { popout: host, generation: Cell::new(0) })
     }
 
     pub fn set_monitor(&self, monitor: Option<gdk::Monitor>) {

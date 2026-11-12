@@ -88,8 +88,13 @@ pub struct MediaPopout {
 
 impl MediaPopout {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
+        Self::with_popout(Popout::new(app, NAMESPACE))
+    }
+
+    /// Shown on `host`, e.g. a [`Popout::pane`] in a sidebar.
+    pub fn with_popout(host: Rc<Popout>) -> Rc<Self> {
         let popout = Rc::new(Self {
-            popout: Popout::new(app, NAMESPACE),
+            popout: host,
             generation: Cell::new(0),
             chosen: RefCell::default(),
             shape: RefCell::default(),

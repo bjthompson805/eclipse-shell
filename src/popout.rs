@@ -37,6 +37,8 @@ pub struct Popout {
     monitor: RefCell<Option<gdk::Monitor>>,
     /// The card's resting distance from the top of the screen.
     top: Cell<f64>,
+    /// Pane mode: the content goes here instead, at this scale (see [`Popout::pane`]).
+    pane: Option<(gtk::Box, Cell<f64>)>,
 }
 
 impl Popout {
@@ -60,7 +62,7 @@ impl Popout {
         layers.add_overlay(&hints);
         window.set_child(Some(&layers));
 
-        let popout = Rc::new(Self { window, card, hints, openness: Tween::shared(OPEN_MS, MORPH), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0) });
+        let popout = Rc::new(Self { window, card, hints, openness: Tween::shared(OPEN_MS, MORPH), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0), pane: None });
 
         let click = gtk::GestureClick::new();
         click.connect_released({
@@ -84,6 +86,31 @@ impl Popout {
         popout
     }
 
+    /// A popout whose content shows in `holder`, somewhere else's surface
+    /// (a sidebar pane), at `scale`. Showing it only marks it open; hiding it
+    /// also empties the holder.
+    /// Its hover hints float on `hints`, over the holder.
+    pub fn pane(app: &gtk::Application, holder: &gtk::Box, hints: &gtk::Fixed, scale: f64) -> Rc<Self> {
+        let window = gtk::ApplicationWindow::builder().application(app).build();
+        Rc::new(Self {
+            window,
+            card: gtk::Box::new(gtk::Orientation::Vertical, 0),
+            hints: hints.clone(),
+            openness: Tween::shared(OPEN_MS, MORPH),
+            open: Cell::new(false),
+            monitor: RefCell::default(),
+            top: Cell::new(0.0),
+            pane: Some((holder.clone(), Cell::new(scale))),
+        })
+    }
+
+    /// A pane's scale, for its next build.
+    pub fn set_pane_scale(&self, scale: f64) {
+        if let Some((_, s)) = &self.pane {
+            s.set(scale);
+        }
+    }
+
     pub fn set_monitor(&self, monitor: Option<gdk::Monitor>) {
         *self.monitor.borrow_mut() = monitor;
     }
@@ -104,6 +131,9 @@ impl Popout {
 
     /// The content scale on the monitor the popout opens on next.
     pub fn scale(&self) -> f64 {
+        if let Some((_, s)) = &self.pane {
+            return s.get();
+        }
         config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
     }
 
@@ -113,13 +143,18 @@ impl Popout {
     }
 
     pub fn set_content(&self, content: &impl IsA<gtk::Widget>) {
-        while let Some(child) = self.card.first_child() {
-            self.card.remove(&child);
+        let target = self.pane.as_ref().map_or(&self.card, |(holder, _)| holder);
+        while let Some(child) = target.first_child() {
+            target.remove(&child);
         }
-        self.card.append(content);
+        target.append(content);
     }
 
     pub fn show(self: &Rc<Self>, anchor: Anchor) {
+        if self.pane.is_some() {
+            self.open.set(true);
+            return;
+        }
         let monitor = self.monitor.borrow().clone();
         let s = self.scale();
         self.window.set_monitor(monitor.as_ref());
@@ -152,6 +187,13 @@ impl Popout {
     }
 
     pub fn hide(self: &Rc<Self>) {
+        if let Some((holder, _)) = &self.pane {
+            self.open.set(false);
+            while let Some(child) = holder.first_child() {
+                holder.remove(&child);
+            }
+            return;
+        }
         if self.open.replace(false) {
             self.animate(0.0);
         }

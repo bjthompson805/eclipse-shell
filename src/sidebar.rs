@@ -18,11 +18,9 @@ use gtk4 as gtk;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::anim::{self, Tween, MORPH};
-use crate::{config, hyprland, theme};
+use crate::{config, hint, hyprland, theme};
 
 const OPEN_MS: f64 = 380.0;
-/// Panel width before scaling, frame edge included.
-const WIDTH: f64 = 340.0;
 /// How long the pointer rests in the corner before the panel opens.
 const INTENT: Duration = Duration::from_millis(150);
 const CLOSE_DELAY: Duration = Duration::from_millis(300);
@@ -40,9 +38,14 @@ pub enum Side {
 
 pub struct Sidebar {
     side: Side,
+    namespace: String,
+    /// Panel width before scaling, frame edge included.
+    width: f64,
     window: gtk::ApplicationWindow,
     canvas: gtk::DrawingArea,
     stage: gtk::Fixed,
+    /// Hover hints float here, over the content.
+    hints: gtk::Fixed,
     content: RefCell<Option<gtk::Widget>>,
     openness: Rc<RefCell<Tween>>,
     open: Cell<bool>,
@@ -60,7 +63,7 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
-    pub fn new(app: &gtk::Application, side: Side, namespace: &str) -> Rc<Self> {
+    pub fn new(app: &gtk::Application, side: Side, namespace: &str, width: f64) -> Rc<Self> {
         let window = gtk::ApplicationWindow::builder().application(app).css_classes(["eclipse-shell"]).build();
         window.init_layer_shell();
         window.set_namespace(Some(namespace));
@@ -77,13 +80,18 @@ impl Sidebar {
         let layers = gtk::Overlay::new();
         layers.set_child(Some(&canvas));
         layers.add_overlay(&stage);
+        let hints = hint::layer();
+        layers.add_overlay(&hints);
         window.set_child(Some(&layers));
 
         let sidebar = Rc::new(Self {
             side,
+            namespace: namespace.to_owned(),
+            width,
             window,
             canvas,
             stage,
+            hints,
             content: RefCell::default(),
             openness: Tween::shared(OPEN_MS, MORPH),
             open: Cell::new(false),
@@ -145,6 +153,11 @@ impl Sidebar {
         sidebar
     }
 
+    /// The layer for hover hints over the content.
+    pub fn hints(&self) -> &gtk::Fixed {
+        &self.hints
+    }
+
     /// `f(true, scale)` as the panel opens, `f(false, scale)` once it has shut.
     pub fn connect_open(&self, f: impl Fn(bool, f64) + 'static) {
         *self.on_open.borrow_mut() = Some(Box::new(f));
@@ -157,7 +170,7 @@ impl Sidebar {
         }
         let content = content.clone().upcast::<gtk::Widget>();
         let s = self.scale();
-        content.set_size_request(((WIDTH - config::FRAME_EDGE) * s).round() as i32, self.height());
+        content.set_size_request(((self.width - config::FRAME_EDGE) * s).round() as i32, self.height());
         self.stage.put(&content, 0.0, 0.0);
         *self.content.borrow_mut() = Some(content);
         self.place(self.openness.borrow().value);
@@ -202,7 +215,7 @@ impl Sidebar {
             let corner = from_edge <= REACH * s && y <= REACH * s;
             // Once open, the bar strip above the panel keeps it open, so the
             // pointer can travel down from the corner.
-            corner || (self.open.get() && same_monitor && from_edge <= WIDTH * s)
+            corner || (self.open.get() && same_monitor && from_edge <= self.width * s)
         });
         if inside == self.in_bar.get() {
             return;
@@ -260,7 +273,7 @@ impl Sidebar {
         let g = monitor.geometry();
         let (x, y) = (x - f64::from(g.x()), y - f64::from(g.y()));
         let from_edge = if self.side == Side::Left { x } else { f64::from(g.width()) - x };
-        (0.0..=f64::from(g.height())).contains(&y) && (0.0..=WIDTH * self.scale()).contains(&from_edge)
+        (0.0..=f64::from(g.height())).contains(&y) && (0.0..=self.width * self.scale()).contains(&from_edge)
     }
 
     fn show(self: &Rc<Self>) {
@@ -271,9 +284,14 @@ impl Sidebar {
         let monitor = self.monitor.borrow().clone();
         self.window.set_monitor(monitor.as_ref());
         self.window.set_margin(Edge::Top, self.top().round() as i32);
-        let width = WIDTH * s + config::FRAME_RADIUS + config::SHADOW_SIZE + 2.0;
+        let width = self.width * s + config::FRAME_RADIUS + config::SHADOW_SIZE + 2.0;
         self.window.set_default_size(width.ceil() as i32, self.height());
         self.stage.set_size_request(width.ceil() as i32, self.height());
+        // The panel animates itself; Hyprland's own layer animation would
+        // replay the close from a stale frame. Set on each open, as a config
+        // reload drops it.
+        let ns = &self.namespace;
+        hyprland::eval(&format!("hl.layer_rule({{ name = \"{ns}-noanim\", match = {{ namespace = \"^{ns}$\" }}, no_anim = true }})"));
         if let Some(f) = self.on_open.borrow().as_ref() {
             f(true, s);
         }
@@ -307,15 +325,16 @@ impl Sidebar {
     /// Where the hole's edge sits at openness `t`, from the screen edge.
     fn reach(&self, t: f64) -> f64 {
         let edge = config::FRAME_EDGE;
-        edge + (WIDTH * self.scale() - edge) * t
+        edge + (self.width * self.scale() - edge) * t
     }
 
     /// Slides the content with the edge and limits input to the panel.
     fn place(&self, t: f64) {
         let reach = self.reach(t);
         let s = self.scale();
-        let surface_w = f64::from(self.stage.width().max(self.stage.width_request()));
-        let content_w = (WIDTH - config::FRAME_EDGE) * s;
+        // The canvas, not the stage: content slid off the right grows the stage.
+        let surface_w = f64::from(if self.canvas.width() > 0 { self.canvas.width() } else { self.stage.width_request() });
+        let content_w = (self.width - config::FRAME_EDGE) * s;
         if let Some(content) = self.content.borrow().as_ref() {
             let x = match self.side {
                 Side::Left => reach - content_w,

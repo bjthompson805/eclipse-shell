@@ -47,7 +47,12 @@ pub struct InboxPopout {
 
 impl InboxPopout {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
-        let inbox = Rc::new(Self { popout: Popout::new(app, NAMESPACE), generation: Cell::new(0), expanded: RefCell::default(), unread_at_open: RefCell::default() });
+        Self::with_popout(Popout::new(app, NAMESPACE))
+    }
+
+    /// Shown on `host`, e.g. a [`Popout::pane`] in a sidebar.
+    pub fn with_popout(host: Rc<Popout>) -> Rc<Self> {
+        let inbox = Rc::new(Self { popout: host, generation: Cell::new(0), expanded: RefCell::default(), unread_at_open: RefCell::default() });
         let weak = Rc::downgrade(&inbox);
         notifications::on_change(move |_| {
             if let Some(i) = weak.upgrade().filter(|i| i.popout.is_open()) {

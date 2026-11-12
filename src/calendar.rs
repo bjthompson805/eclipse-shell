@@ -65,8 +65,13 @@ pub struct Calendar {
 
 impl Calendar {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
+        Self::with_popout(Popout::new(app, NAMESPACE))
+    }
+
+    /// Shown on `host`, e.g. a [`Popout::pane`] in a sidebar.
+    pub fn with_popout(host: Rc<Popout>) -> Rc<Self> {
         let today = Month::of(&now());
-        Rc::new(Self { popout: Popout::new(app, NAMESPACE), view: Rc::new(View { month: Cell::new(today), selected: Cell::new(None), hovered: Cell::new(None) }) })
+        Rc::new(Self { popout: host, view: Rc::new(View { month: Cell::new(today), selected: Cell::new(None), hovered: Cell::new(None) }) })
     }
 
     pub fn set_monitor(&self, monitor: Option<gdk::Monitor>) {
