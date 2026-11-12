@@ -5,6 +5,7 @@
 //! the bar (taking input only on the band), and an invisible strip that
 //! reserves the band's height so tiled windows sit below it.
 
+mod agent_usage;
 mod clock;
 mod module;
 mod stats;
@@ -156,7 +157,7 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
     let _ = cr.stroke();
 }
 
-/// The band: mark, workspaces, system stats and title on the left, the clock centred, and
+/// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// the power button on the right.
 fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>) -> gtk::CenterBox {
     let span = (band * 0.76).round();
@@ -173,6 +174,10 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     if config::BAR_STATS {
         let stats = Module::new(&stats::stats(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
         left.append(&stats.widget);
+    }
+    if config::BAR_AGENT_USAGE {
+        let usage = Module::new(&agent_usage::agent_usage(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
+        left.append(&usage.widget);
     }
     left.append(&title.widget);
 
