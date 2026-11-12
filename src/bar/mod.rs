@@ -46,6 +46,7 @@ pub struct Actions {
     pub display: Rc<dyn Fn(f64)>,
     pub network: Rc<dyn Fn(f64)>,
     pub bluetooth: Rc<dyn Fn(f64)>,
+    pub media: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
@@ -60,6 +61,7 @@ struct Anchors {
     display: Option<gtk::Widget>,
     network: Option<gtk::Widget>,
     bluetooth: Option<gtk::Widget>,
+    media: Option<gtk::Widget>,
     battery: Option<gtk::Widget>,
 }
 
@@ -172,6 +174,11 @@ impl Bar {
     /// Where the Bluetooth glyph's centre sits, if the bar shows it.
     pub fn bluetooth_x(&self) -> Option<f64> {
         self.anchors.bluetooth.as_ref().filter(|b| b.is_visible()).and_then(centre_x)
+    }
+
+    /// Where the now-playing pill's centre sits, if the bar shows it.
+    pub fn media_x(&self) -> Option<f64> {
+        self.anchors.media.as_ref().filter(|m| m.is_visible()).and_then(centre_x)
     }
 
     /// Where the battery's centre sits, if the bar shows it.
@@ -354,7 +361,18 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     if config::BAR_MEDIA {
         let playing = media::media(s);
         let media = Module::new(&playing, pill(12.0 * s));
-        media.connect_tapped(media::toggle);
+        media.connect_tapped({
+            let (actions, pill) = (actions.clone(), media.widget.downgrade());
+            move || {
+                if let Some(x) = pill.upgrade().and_then(|p| centre_x(p.upcast_ref())) {
+                    (actions.media)(x);
+                }
+            }
+        });
+        // A middle click plays or pauses without opening anything.
+        let middle = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_MIDDLE).build();
+        middle.connect_released(|_, _, _, _| media::toggle());
+        media.widget.add_controller(middle);
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         scroll.connect_scroll(|_, _, dy| {
             if dy != 0.0 {
@@ -364,6 +382,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         });
         media.widget.add_controller(scroll);
         playing.bind_property("visible", &media.widget, "visible").sync_create().build();
+        anchors.media = Some(media.widget.clone().upcast());
         right.append(&media.widget);
     }
     if config::BAR_NET_SPEED {

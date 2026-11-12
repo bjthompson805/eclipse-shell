@@ -178,13 +178,25 @@ pub fn eyebrow(s: f64, label: &str) -> gtk::Box {
 
 /// The card surface, rounded and outlined, behind `content`.
 pub fn card(content: &impl IsA<gtk::Widget>) -> gtk::Overlay {
+    tinted_card(content, Rc::default())
+}
+
+/// [`card`], washed from its top-left corner with `tint` while it has one.
+pub fn tinted_card(content: &impl IsA<gtk::Widget>, tint: Rc<Cell<Option<theme::Rgba>>>) -> gtk::Overlay {
     let surface = gtk::DrawingArea::new();
-    surface.set_draw_func(|_, cr, w, h| {
+    surface.set_draw_func(move |_, cr, w, h| {
         let palette = theme::palette();
         let (w, h) = (f64::from(w), f64::from(h));
         theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, config::LAUNCHER_RADIUS);
         theme::set_source(cr, palette.base);
         let _ = cr.fill_preserve();
+        if let Some(c) = tint.get() {
+            let wash = gtk::cairo::RadialGradient::new(0.0, 0.0, 0.0, 0.0, 0.0, w.max(h));
+            wash.add_color_stop_rgba(0.0, c.r, c.g, c.b, 0.22);
+            wash.add_color_stop_rgba(1.0, c.r, c.g, c.b, 0.0);
+            let _ = cr.set_source(&wash);
+            let _ = cr.fill_preserve();
+        }
         cr.set_line_width(1.0);
         theme::set_source(cr, palette.outline);
         let _ = cr.stroke();
