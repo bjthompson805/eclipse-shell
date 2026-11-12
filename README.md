@@ -17,19 +17,27 @@ Early work in progress.
 
 ## Requirements
 
-- FreeBSD (Linux probably works too, untested) running Hyprland with a Lua config
-- `gtk4`, `gtk4-layer-shell`, Rust, `curl`
-- Fonts: JetBrainsMono Nerd Font, Material Symbols Rounded
-- Icon theme: Papirus-Dark
-- wallust, writing `~/.cache/wallust/colors.json`
+FreeBSD (Linux probably works too, untested) running Hyprland with a Lua
+config. `install.sh` installs the rest: `gtk4`, `gtk4-layer-shell`, Rust,
+`curl`, wallust, the Papirus icon theme, JetBrainsMono Nerd Font, PipeWire and
+WirePlumber, plus Material Symbols Rounded from Google's repository.
 
-## Running
+## Install
+
+From the checkout, as your desktop user:
 
 ```sh
-cargo run --release
+./install.sh
 ```
 
-Open the launcher, for example from a keybinding:
+It installs missing packages, builds the shell into `~/.local/bin`, installs a
+small root helper for power profiles, the battery charge limit and the Wi-Fi
+radio (asking for your password through doas or sudo), and restarts the shell
+if it's running. Run it again after pulling to update. `./install.sh
+--no-system` only builds and installs the shell.
+
+Start `eclipse-shell` from your Hyprland autostart, and bind the launcher to a
+key:
 
 ```sh
 eclipse-shell toggle-launcher
