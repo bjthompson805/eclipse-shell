@@ -55,6 +55,9 @@ pub struct Actions {
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
+    /// The pointer moved over a monitor's bar, to (x, y), or left it; the
+    /// sidebars open from its outer corners.
+    pub bar_pointer: Rc<dyn Fn(&gdk::Monitor, Option<(f64, f64)>)>,
 }
 
 /// Bar modules that popouts drop beneath, for opening them by command.
@@ -136,6 +139,16 @@ impl Bar {
         layers.add_overlay(&content);
         layers.add_overlay(&hints);
         frame.set_child(Some(&layers));
+        let motion = gtk::EventControllerMotion::new();
+        motion.connect_motion({
+            let (actions, monitor) = (actions.clone(), monitor.clone());
+            move |_, x, y| (actions.bar_pointer)(&monitor, Some((x, y)))
+        });
+        motion.connect_leave({
+            let (actions, monitor) = (actions.clone(), monitor.clone());
+            move |_| (actions.bar_pointer)(&monitor, None)
+        });
+        frame.add_controller(motion);
 
         reserve.present();
         frame.present();

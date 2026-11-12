@@ -26,7 +26,8 @@ pub fn mark(size: f64) -> gtk::DrawingArea {
     area
 }
 
-fn draw(cr: &cairo::Context, size: f64) {
+/// Draws the mark in the square (0, 0, size, size).
+pub fn draw(cr: &cairo::Context, size: f64) {
     let palette = theme::palette();
     let body_r = size * 0.40;
     let (body_x, body_y) = (size * 0.44, size * 0.56);

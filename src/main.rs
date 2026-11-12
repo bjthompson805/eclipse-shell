@@ -23,6 +23,8 @@ mod media_popout;
 mod network_popout;
 mod notifications;
 mod osd;
+mod profile;
+mod sidebar;
 mod mixer_popout;
 mod overview;
 mod popout;
@@ -62,6 +64,7 @@ use media_popout::MediaPopout;
 use mixer_popout::MixerPopout;
 use network_popout::NetworkPopout;
 use osd::Osd;
+use profile::Profile;
 use overview::Overview;
 use power::Power;
 use resources_popout::ResourcesPopout;
@@ -96,6 +99,7 @@ struct Shell {
     inbox: Rc<InboxPopout>,
     clipboard: Rc<ClipboardPopout>,
     osd: Rc<Osd>,
+    profile: Rc<Profile>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -130,6 +134,7 @@ impl Shell {
         self.inbox.set_monitor(focused.clone());
         self.clipboard.set_monitor(focused.clone());
         self.osd.set_monitor(focused.clone());
+        self.profile.sidebar().set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -159,6 +164,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
     let (network, bluetooth, media) = (shell_ref.network.clone(), shell_ref.bluetooth.clone(), shell_ref.media.clone());
     let (weather, traffic, spaces) = (shell_ref.weather.clone(), shell_ref.traffic.clone(), shell_ref.workspaces.clone());
     let inbox = shell_ref.inbox.clone();
+    let profile = shell_ref.profile.clone();
     let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
@@ -177,6 +183,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
         resources: Rc::new(move |x| resources.toggle(x)),
+        bar_pointer: Rc::new(move |monitor, at| profile.sidebar().track_bar(monitor, at)),
     });
     let monitors = display.monitors();
     shell_ref.bars = (0..monitors.n_items())
@@ -204,6 +211,7 @@ struct Surfaces {
     inbox: Rc<InboxPopout>,
     clipboard: Rc<ClipboardPopout>,
     osd: Rc<Osd>,
+    profile: Rc<Profile>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -254,10 +262,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let inbox = InboxPopout::new(app);
     let clipboard = ClipboardPopout::new(app);
     let osd = Osd::new(app);
+    let profile = Profile::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), osd: osd.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), osd: osd.clone(), profile: profile.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -277,7 +286,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, osd, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, osd, profile, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -450,6 +459,11 @@ fn main() -> glib::ExitCode {
                     if let Some(x) = shell.focused_bar().and_then(Bar::stats_x) {
                         surfaces.resources.toggle(x);
                     }
+                }
+            }
+            Some("toggle-sidebar-left") => {
+                if let Some(surfaces) = surfaces.get() {
+                    surfaces.profile.sidebar().toggle();
                 }
             }
             Some("toggle-power") => {
