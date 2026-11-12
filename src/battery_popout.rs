@@ -26,7 +26,7 @@ const LIMIT_STEP: u32 = 5;
 const LOW: u32 = 20;
 
 #[derive(Clone, Copy, PartialEq)]
-enum Profile {
+pub(crate) enum Profile {
     Saver,
     Balanced,
     Performance,
@@ -42,6 +42,12 @@ impl Profile {
             Profile::Balanced => "",
             Profile::Performance => "-a maximum -b hiadaptive",
         }
+    }
+
+    /// The profile rc.conf's powerd settings select, if any.
+    pub(crate) fn from_rc(powerd_enable: &str, powerd_flags: &str) -> Option<Profile> {
+        let flags = powerd_flags.split_whitespace().collect::<Vec<_>>().join(" ");
+        powerd_enable.trim().eq_ignore_ascii_case("yes").then(|| Profile::ALL.into_iter().find(|p| p.flags() == flags)).flatten()
     }
 
     fn arg(self) -> &'static str {
@@ -354,9 +360,7 @@ async fn read() -> Reading {
 
     let rc = output(&["sh", "-c", "sysrc -n powerd_enable 2>/dev/null; sysrc -n powerd_flags 2>/dev/null"]).await.unwrap_or_default();
     let mut lines = rc.lines();
-    let powerd_on = lines.next().is_some_and(|l| l.trim().eq_ignore_ascii_case("yes"));
-    let flags = lines.next().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
-    let profile = powerd_on.then(|| Profile::ALL.into_iter().find(|p| p.flags() == flags)).flatten();
+    let profile = Profile::from_rc(lines.next().unwrap_or(""), lines.next().unwrap_or(""));
 
     Reading {
         percent: number("Remaining capacity").unwrap_or(0.0).clamp(0.0, 100.0) as u32,

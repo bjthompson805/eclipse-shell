@@ -15,6 +15,7 @@ use gtk::prelude::*;
 use gtk::{gio, glib, pango};
 use gtk4 as gtk;
 
+use crate::battery_popout::Profile;
 use crate::theme::{self, Rgba, TextStyle, FAINT, FLAME, SUBTLE};
 
 const POLL: Duration = Duration::from_secs(2);
@@ -35,6 +36,8 @@ if [ -n "$n" ]; then
 elif [ -f /var/run/eclipse-bt.off ]; then
     echo 'btoff=1'
 fi
+printf 'powerd=%s\n' "$(sysrc -n powerd_enable 2>/dev/null)"
+printf 'pflags=%s\n' "$(sysrc -n powerd_flags 2>/dev/null)"
 sysctl -i hw.acpi.battery.units hw.acpi.battery.life hw.acpi.battery.state
 "#;
 
@@ -49,6 +52,7 @@ struct Reading {
     /// The adapter is there but switched off.
     bluetooth_off: bool,
     battery: Option<Battery>,
+    profile: Option<Profile>,
 }
 
 #[derive(Clone)]
@@ -87,8 +91,16 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
     }
     row.insert_child_after(&sun, Some(&volume));
     sun.set_size_request(slot, slot);
+    // The level bars stay the battery's truth; off the charger, a corner
+    // badge rides on top for a profile other than Balanced: a plus for
+    // Saver, a bolt for Performance (a speedometer doesn't read that small).
+    let badge = gtk::DrawingArea::new();
+    badge.set_can_target(false);
+    let battery_glyph_box = gtk::Overlay::new();
+    battery_glyph_box.set_child(Some(&battery));
+    battery_glyph_box.add_overlay(&badge);
     let battery_row = gtk::Box::new(gtk::Orientation::Horizontal, (2.0 * s).round() as i32);
-    battery_row.append(&battery);
+    battery_row.append(&battery_glyph_box);
     battery_row.append(&battery_pct);
     row.append(&battery_row);
     on_click(&volume, actions.mixer.clone());
@@ -98,6 +110,21 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
     on_click(&battery_row, actions.battery.clone());
 
     let reading = Rc::new(RefCell::new(Reading::default()));
+    badge.set_draw_func({
+        let reading = reading.clone();
+        move |_, cr, w, h| {
+            let r = reading.borrow();
+            if !r.battery.is_some_and(|b| !b.charging) {
+                return;
+            }
+            let (name, color) = match r.profile {
+                Some(Profile::Saver) => ("add", SUBTLE),
+                Some(Profile::Performance) => ("bolt", FLAME),
+                _ => return,
+            };
+            draw_badge(cr, f64::from(w), f64::from(h), s, name, color);
+        }
+    });
     sun.set_draw_func({
         let reading = reading.clone();
         move |_, cr, w, h| {
@@ -142,6 +169,7 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
                 };
                 set_glyph(&battery, battery_glyph(b), glyph_px + 1.0 * s, color);
                 battery_pct.set_text(&format!("{}%", b.percent));
+                badge.queue_draw();
                 let text = if b.low() { color } else { SUBTLE };
                 TextStyle::new(9.5 * s, pango::Weight::Medium, text).apply(&battery_pct);
             }
@@ -242,6 +270,22 @@ fn battery_glyph(b: Battery) -> &'static str {
     }
 }
 
+/// A small glyph on a disc of bar colour, in the bottom-right corner.
+fn draw_badge(cr: &gtk::cairo::Context, w: f64, h: f64, s: f64, name: &str, color: Rgba) {
+    let radius = 5.0 * s;
+    let (cx, cy) = (w - radius + 1.0 * s, h - radius + 1.0 * s);
+    theme::set_source(cr, theme::palette().base);
+    cr.arc(cx, cy, radius, 0.0, 2.0 * PI);
+    let _ = cr.fill();
+    let glyph = theme::filled_icon_glyph(name, 9.0 * s, color);
+    let layout = pangocairo::functions::create_layout(cr);
+    layout.set_text(name);
+    layout.set_attributes(glyph.attributes().as_ref());
+    let (_, ink) = layout.pixel_extents();
+    cr.move_to(cx - f64::from(ink.x()) - f64::from(ink.width()) / 2.0, cy - f64::from(ink.y()) - f64::from(ink.height()) / 2.0);
+    pangocairo::functions::show_layout(cr, &layout);
+}
+
 /// A sun: a disc and eight rays, the rays reaching further when bright.
 fn draw_sun(cr: &gtk::cairo::Context, w: f64, h: f64, size: f64, bright: bool) {
     let (cx, cy) = (w / 2.0, h / 2.0);
@@ -323,5 +367,6 @@ fn parse(text: &str) -> Reading {
         bluetooth: v.get("bt").map(|_| num("btconn").unwrap_or(0.0) as u32),
         bluetooth_off: v.contains_key("btoff"),
         battery,
+        profile: Profile::from_rc(v.get("powerd").copied().unwrap_or(""), v.get("pflags").copied().unwrap_or("")),
     }
 }
