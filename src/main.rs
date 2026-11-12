@@ -412,6 +412,15 @@ fn main() -> glib::ExitCode {
                     surfaces.clipboard.toggle();
                 }
             }
+            Some("osd") => {
+                if let Some(surfaces) = surfaces.get() {
+                    match args.get(2).and_then(|a| a.to_str()) {
+                        Some("volume") => surfaces.osd.level(true),
+                        Some("brightness") => surfaces.osd.level(false),
+                        _ => {}
+                    }
+                }
+            }
             Some("lock-keys") => {
                 if let Some(surfaces) = surfaces.get() {
                     surfaces.osd.lock_key(args.get(2).and_then(|a| a.to_str()) != Some("num"));

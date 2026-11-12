@@ -2,6 +2,10 @@
 //! change for a moment, such as Caps Lock turning on, then fades. It never
 //! takes a click or the keyboard and reserves no space.
 //!
+//! Levels: the volume and brightness key binds run `eclipse-shell osd
+//! volume|brightness` after making their change; the new level is read back
+//! (wpctl, backlight) and shown as a bar.
+//!
 //! Lock keys: Hyprland runs `eclipse-shell lock-keys caps|num` as Caps Lock
 //! or Num Lock is pressed (see the user's lock_keys.lua; release binds never
 //! fire for them). FreeBSD has no LED devices to watch and Hyprland's devices
@@ -13,12 +17,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gtk::prelude::*;
-use gtk::{cairo, gdk, glib, pango};
+use gtk::{cairo, gdk, gio, glib, pango};
 use gtk4 as gtk;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::anim::{self, Easing, Tween, MORPH};
-use crate::theme::{self, TextStyle, CREAM, DIM, ICON_DIM};
+use crate::theme::{self, TextStyle, CREAM, DIM, FAINT, HAIR, ICON_DIM};
 use crate::{config, hyprland};
 
 const SHOW_FOR: Duration = Duration::from_millis(1400);
@@ -36,6 +40,8 @@ pub struct Osd {
     /// Fading in or held, rather than fading out.
     showing: Cell<bool>,
     caps_on: Cell<bool>,
+    /// Bumped per level read, so a slow read can't overwrite a newer one.
+    reads: Cell<u32>,
     num_on: Cell<bool>,
 }
 
@@ -72,7 +78,7 @@ impl Osd {
             }
         });
 
-        let osd = Rc::new(Self { window, row, fade: Tween::shared(FADE_MS, MORPH), generation: Cell::new(0), monitor: RefCell::default(), showing: Cell::new(false), caps_on: Cell::new(false), num_on: Cell::new(false) });
+        let osd = Rc::new(Self { window, row, fade: Tween::shared(FADE_MS, MORPH), generation: Cell::new(0), monitor: RefCell::default(), showing: Cell::new(false), caps_on: Cell::new(false), reads: Cell::new(0), num_on: Cell::new(false) });
         if let Some((caps, num)) = lock_keys() {
             osd.caps_on.set(caps);
             osd.num_on.set(num);
@@ -91,15 +97,70 @@ impl Osd {
         self.flash_lock(glyph, name, state.get());
     }
 
-    fn flash_lock(self: &Rc<Self>, glyph: &str, name: &str, on: bool) {
+    /// The volume or brightness just changed: read it back and show it.
+    pub fn level(self: &Rc<Self>, volume: bool) {
+        let read = self.reads.get() + 1;
+        self.reads.set(read);
+        let osd = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some((value, muted)) = read_level(volume).await else { return };
+            let Some(o) = osd.upgrade().filter(|o| o.reads.get() == read) else { return };
+            let glyph = match value {
+                _ if volume && muted => "volume_off",
+                v if volume && v > 0.5 => "volume_up",
+                v if volume && v > 0.0 => "volume_down",
+                _ if volume => "volume_mute",
+                v if v > 0.66 => "brightness_high",
+                v if v > 0.33 => "brightness_medium",
+                _ => "brightness_low",
+            };
+            o.flash_level(glyph, value, muted);
+        });
+    }
+
+    fn flash_level(self: &Rc<Self>, glyph: &str, value: f64, muted: bool) {
         let s = self.scale();
+        let px = |v: f64| (v * s).round() as i32;
+        self.clear_row(s);
+        self.row.append(&theme::filled_icon_glyph(glyph, 17.0 * s, if muted { FAINT } else { CREAM }));
+        let bar = gtk::DrawingArea::new();
+        bar.set_hexpand(true);
+        bar.set_content_height(px(4.0));
+        bar.set_valign(gtk::Align::Center);
+        bar.set_draw_func(move |_, cr, w, h| {
+            let (w, h) = (f64::from(w), f64::from(h));
+            theme::rounded_rect(cr, 0.0, 0.0, w, h, h / 2.0);
+            theme::set_source(cr, HAIR);
+            let _ = cr.fill();
+            let filled = (w * value.clamp(0.0, 1.0)).max(if value > 0.0 { h } else { 0.0 });
+            if filled > 0.0 {
+                theme::rounded_rect(cr, 0.0, 0.0, filled, h, h / 2.0);
+                theme::set_source(cr, if muted { FAINT } else { theme::palette().accent_lit });
+                let _ = cr.fill();
+            }
+        });
+        self.row.append(&bar);
+        let percent = TextStyle::new(11.0 * s, pango::Weight::Semibold, if muted { DIM } else { CREAM }).mono().label(&format!("{:.0}", value * 100.0));
+        // Room for "100", so the bar doesn't twitch as the digits change.
+        percent.set_width_chars(3);
+        percent.set_xalign(1.0);
+        self.row.append(&percent);
+        self.show();
+    }
+
+    fn clear_row(&self, s: f64) {
         let px = |v: f64| (v * s).round() as i32;
         while let Some(child) = self.row.first_child() {
             self.row.remove(&child);
         }
-        self.row.set_spacing(px(10.0));
+        self.row.set_spacing(px(12.0));
         self.row.set_margin_start(px(16.0));
         self.row.set_margin_end(px(18.0));
+    }
+
+    fn flash_lock(self: &Rc<Self>, glyph: &str, name: &str, on: bool) {
+        let s = self.scale();
+        self.clear_row(s);
         self.row.append(&theme::icon_glyph(glyph, 17.0 * s, if on { CREAM } else { ICON_DIM }));
         let label = TextStyle::new(11.5 * s, pango::Weight::Semibold, CREAM).label(name);
         label.set_hexpand(true);
@@ -155,4 +216,20 @@ fn lock_keys() -> Option<(bool, bool)> {
     let devices: serde_json::Value = serde_json::from_str(&hyprland::request("j/devices").ok()?).ok()?;
     let main = devices["keyboards"].as_array()?.iter().find(|k| k["main"].as_bool() == Some(true))?;
     Some((main["capsLock"].as_bool()?, main["numLock"].as_bool()?))
+}
+
+/// The default sink's volume and mute, or the backlight (never muted), 0..1.
+async fn read_level(volume: bool) -> Option<(f64, bool)> {
+    let argv: &[&str] = if volume { &["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"] } else { &["backlight", "-q"] };
+    let argv: Vec<&std::ffi::OsStr> = argv.iter().map(std::ffi::OsStr::new).collect();
+    let process = gio::Subprocess::newv(&argv, gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_SILENCE).ok()?;
+    let (stdout, _) = process.communicate_utf8_future(None).await.ok()?;
+    let stdout = stdout?;
+    if volume {
+        // "Volume: 0.34" or "Volume: 0.34 [MUTED]"
+        let value: f64 = stdout.split_whitespace().nth(1)?.parse().ok()?;
+        Some((value, stdout.contains("[MUTED]")))
+    } else {
+        Some((stdout.trim().parse::<f64>().ok()? / 100.0, false))
+    }
 }
