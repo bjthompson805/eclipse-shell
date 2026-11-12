@@ -108,12 +108,22 @@ impl Title {
         self.live.set_size_request(fit(text), -1);
 
         let target = if text.is_empty() { 0.0 } else { self.text_width(text).min(text_room) + text_lead };
+        // The same window renaming itself (a terminal's spinner, a page
+        // loading) swaps in place; animating every rename would keep the bar
+        // repainting for as long as the title keeps changing.
+        let renamed = previous.as_ref().zip(focused).is_some_and(|(p, f)| !p.address.is_empty() && p.address == f.address);
+        if renamed {
+            self.width.borrow_mut().jump(target);
+            self.sizer.set_size_request(target.round() as i32, self.sizer.height_request());
+            self.fade.borrow_mut().jump(1.0);
+            self.live.set_opacity(1.0);
+            self.ghost.set_opacity(0.0);
+            return;
+        }
         anim::animate_to(&self.sizer, &self.width, target, |sizer, w| {
             sizer.set_size_request(w.round() as i32, sizer.height_request());
         });
 
-        // A plain title change (same window, e.g. a terminal updating its
-        // title) cross-fades like a focus change does.
         if previous.is_some() {
             self.fade.borrow_mut().jump(0.0);
         }

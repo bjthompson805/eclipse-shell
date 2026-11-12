@@ -157,13 +157,15 @@ pub struct Workspaces {
     metrics: Metrics,
     pills: RefCell<HashMap<i32, Rc<Pill>>>,
     shown: RefCell<Vec<i32>>,
+    /// What the pills last showed: (id, active, app classes) each.
+    last_view: RefCell<Option<Vec<(i32, bool, Vec<String>)>>>,
 }
 
 impl Workspaces {
     pub fn new(s: f64) -> Rc<Self> {
         let metrics = Metrics::new(s);
         let widget = gtk::Box::builder().spacing(metrics.gap.round() as i32).valign(gtk::Align::Center).build();
-        let strip = Rc::new(Self { widget, metrics, pills: RefCell::default(), shown: RefCell::default() });
+        let strip = Rc::new(Self { widget, metrics, pills: RefCell::default(), shown: RefCell::default(), last_view: RefCell::default() });
 
         // Scrolling walks to the neighbouring workspace.
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::DISCRETE);
@@ -215,6 +217,13 @@ impl Workspaces {
         }
 
         let ids = shown_workspaces(active, |id| classes.contains_key(&id));
+        // Title changes arrive here too; leave the pills alone unless what
+        // they show has changed.
+        let view: Vec<(i32, bool, Vec<String>)> = ids.iter().map(|&id| (id, id == active, classes.get(&id).cloned().unwrap_or_default())).collect();
+        if self.last_view.borrow().as_ref() == Some(&view) {
+            return;
+        }
+        *self.last_view.borrow_mut() = Some(view);
         let mut pills = self.pills.borrow_mut();
         pills.retain(|id, _| ids.contains(id));
         while let Some(child) = self.widget.first_child() {

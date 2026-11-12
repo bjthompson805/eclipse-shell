@@ -11,6 +11,8 @@ use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Window {
+    /// Hyprland's handle for the window, stable while it lives.
+    pub address: String,
     pub workspace: i32,
     pub class: String,
     pub title: String,
@@ -44,6 +46,8 @@ struct WorkspaceRef {
 #[derive(Deserialize)]
 struct RawClient {
     #[serde(default)]
+    address: String,
+    #[serde(default)]
     class: String,
     #[serde(default)]
     title: String,
@@ -53,7 +57,7 @@ struct RawClient {
 impl RawClient {
     fn into_window(self) -> Option<Window> {
         let workspace = self.workspace?.id;
-        Some(Window { workspace, class: self.class, title: self.title })
+        Some(Window { address: self.address, workspace, class: self.class, title: self.title })
     }
 }
 
