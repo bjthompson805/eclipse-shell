@@ -171,23 +171,42 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
     });
 
     on_scroll(&volume, {
-        let refresh = refresh.clone();
+        let (refresh, level) = (refresh.clone(), actions.level.clone());
         move |up| {
-            nudge_volume(up);
-            let _ = refresh.try_send(());
+            let (refresh, level) = (refresh.clone(), level.clone());
+            nudge_volume(up, move || {
+                level(true);
+                let _ = refresh.try_send(());
+            });
         }
     });
-    on_scroll(&sun, move |up| {
-        spawn(&["backlight", if up { "incr" } else { "decr" }, "3"]);
-        let _ = refresh.try_send(());
+    on_scroll(&sun, {
+        let level = actions.level.clone();
+        move |up| {
+            let (refresh, level) = (refresh.clone(), level.clone());
+            let step = format!("backlight {} 3", if up { "incr" } else { "decr" });
+            then(step, move || {
+                level(false);
+                let _ = refresh.try_send(());
+            });
+        }
     });
     row
 }
 
-/// Unmutes and steps the default output's volume by 3%, up to 100%.
-pub fn nudge_volume(up: bool) {
-    spawn(&["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"]);
-    spawn(&["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", if up { "3%+" } else { "3%-" }]);
+/// Unmutes and steps the default output's volume by 3%, up to 100%, then
+/// calls `done`.
+pub fn nudge_volume(up: bool, done: impl FnOnce() + 'static) {
+    let step = if up { "3%+" } else { "3%-" };
+    then(format!("wpctl set-mute @DEFAULT_AUDIO_SINK@ 0; wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ {step}"), done);
+}
+
+/// Runs `script` and calls `done` once it has finished.
+fn then(script: String, done: impl FnOnce() + 'static) {
+    glib::spawn_future_local(async move {
+        run(&script).await;
+        done();
+    });
 }
 
 fn set_glyph(label: &gtk::Label, name: &str, px: f64, color: Rgba) {
@@ -262,13 +281,6 @@ fn on_scroll(widget: &impl IsA<gtk::Widget>, f: impl Fn(bool) + 'static) {
         glib::Propagation::Stop
     });
     widget.add_controller(scroll);
-}
-
-fn spawn(argv: &[&str]) {
-    let argv: Vec<&std::ffi::OsStr> = argv.iter().map(std::ffi::OsStr::new).collect();
-    if let Ok(p) = gio::Subprocess::newv(&argv, gio::SubprocessFlags::STDOUT_SILENCE | gio::SubprocessFlags::STDERR_SILENCE) {
-        p.wait_async(gio::Cancellable::NONE, |_| {});
-    }
 }
 
 async fn run(script: &str) -> Option<String> {

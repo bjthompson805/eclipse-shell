@@ -55,6 +55,8 @@ pub struct Actions {
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
+    /// The volume (true) or brightness (false) just changed: flash the OSD.
+    pub level: Rc<dyn Fn(bool)>,
     /// The pointer moved over a monitor's bar, to (x, y), or left it; the
     /// sidebars open from its outer corners.
     pub bar_pointer: Rc<dyn Fn(&gdk::Monitor, Option<(f64, f64)>)>,
@@ -426,9 +428,11 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         middle.connect_released(|_, _, _, _| media::toggle());
         media.widget.add_controller(middle);
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-        scroll.connect_scroll(|_, _, dy| {
+        let level = actions.level.clone();
+        scroll.connect_scroll(move |_, _, dy| {
             if dy != 0.0 {
-                status::nudge_volume(dy < 0.0);
+                let level = level.clone();
+                status::nudge_volume(dy < 0.0, move || level(true));
             }
             gtk::glib::Propagation::Stop
         });

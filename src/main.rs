@@ -177,6 +177,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
     let inbox = shell_ref.inbox.clone();
     let (profile, controls) = (shell_ref.profile.clone(), shell_ref.controls.clone());
     let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
+    let osd = shell_ref.osd.clone();
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
         power: Rc::new(move || power.toggle()),
@@ -194,6 +195,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
         resources: Rc::new(move |x| resources.toggle(x)),
+        level: Rc::new(move |volume| osd.level(volume)),
         bar_pointer: Rc::new(move |monitor, at| {
             profile.sidebar().track_bar(monitor, at);
             controls.sidebar().track_bar(monitor, at);
