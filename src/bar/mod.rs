@@ -47,6 +47,7 @@ pub struct Actions {
     pub network: Rc<dyn Fn(f64)>,
     pub bluetooth: Rc<dyn Fn(f64)>,
     pub media: Rc<dyn Fn(f64)>,
+    pub weather: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
@@ -62,6 +63,7 @@ struct Anchors {
     network: Option<gtk::Widget>,
     bluetooth: Option<gtk::Widget>,
     media: Option<gtk::Widget>,
+    weather: Option<gtk::Widget>,
     battery: Option<gtk::Widget>,
 }
 
@@ -179,6 +181,11 @@ impl Bar {
     /// Where the now-playing pill's centre sits, if the bar shows it.
     pub fn media_x(&self) -> Option<f64> {
         self.anchors.media.as_ref().filter(|m| m.is_visible()).and_then(centre_x)
+    }
+
+    /// Where the weather pill's centre sits, if the bar shows it.
+    pub fn weather_x(&self) -> Option<f64> {
+        self.anchors.weather.as_ref().filter(|w| w.is_visible()).and_then(centre_x)
     }
 
     /// Where the battery's centre sits, if the bar shows it.
@@ -402,7 +409,16 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     }
     if config::BAR_WEATHER {
         let reading = weather::weather(s);
-        let weather = Module::new(&reading, ModuleSpec { interactive: false, ..pill(12.0 * s) });
+        let weather = Module::new(&reading, pill(12.0 * s));
+        weather.connect_tapped({
+            let (actions, pill) = (actions.clone(), weather.widget.downgrade());
+            move || {
+                if let Some(x) = pill.upgrade().and_then(|p| centre_x(p.upcast_ref())) {
+                    (actions.weather)(x);
+                }
+            }
+        });
+        anchors.weather = Some(weather.widget.clone().upcast());
         // The pill only shows once there is a reading to put in it.
         reading.bind_property("visible", &weather.widget, "visible").sync_create().build();
         right.append(&weather.widget);

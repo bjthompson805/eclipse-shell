@@ -1,10 +1,11 @@
-//! Current weather and today's sunrise/sunset for the launcher. The location
-//! is the configured place (looked up by name) or else the IP address's city
-//! (ip-api.com); conditions come from Open-Meteo. Fetched with curl and
-//! refreshed every 15 minutes.
+//! Current weather and today's sunrise/sunset for the bar and launcher, and a
+//! fuller forecast for the weather popout. The location is the configured
+//! place (looked up by name) or else the IP address's city (ip-api.com);
+//! conditions come from Open-Meteo. Fetched with curl; the current reading
+//! refreshes every 15 minutes, the forecast at most every 10 when asked for.
 
 use std::cell::RefCell;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gtk::{gio, glib};
 use gtk4 as gtk;
@@ -13,6 +14,8 @@ use serde::Deserialize;
 use crate::config;
 
 const REFRESH: Duration = Duration::from_secs(15 * 60);
+const FORECAST_FRESH: Duration = Duration::from_secs(10 * 60);
+const HOURS: usize = 12;
 
 #[derive(Clone, Debug)]
 pub struct Weather {
@@ -40,6 +43,15 @@ pub enum Glyph {
 }
 
 impl Glyph {
+    /// The Material Symbols name for the condition by day or night.
+    pub fn symbol_at(self, day: bool) -> &'static str {
+        match self {
+            Glyph::Sun if !day => "clear_night",
+            Glyph::Cloud if !day => "partly_cloudy_night",
+            _ => self.symbol(),
+        }
+    }
+
     /// The Material Symbols name for the condition.
     pub fn symbol(self) -> &'static str {
         match self {
@@ -53,7 +65,64 @@ impl Glyph {
     }
 }
 
+/// The fuller picture the weather popout shows.
+#[derive(Clone, Debug)]
+pub struct Forecast {
+    pub city: String,
+    /// "°C" or "°F".
+    pub unit: &'static str,
+    /// "km/h" or "mph".
+    pub wind_unit: &'static str,
+    pub now: Now,
+    /// The next hours, this one first.
+    pub hours: Vec<Hour>,
+    /// Today first.
+    pub days: Vec<Day>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Now {
+    pub temp: f64,
+    pub feels_like: f64,
+    pub condition: &'static str,
+    pub glyph: Glyph,
+    pub day: bool,
+    pub humidity: f64,
+    pub wind: f64,
+    /// Degrees the wind comes from.
+    pub wind_from: f64,
+    /// Seconds after local midnight.
+    pub seconds: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct Hour {
+    /// 0 to 23.
+    pub hour: u32,
+    pub temp: f64,
+    pub glyph: Glyph,
+    pub day: bool,
+    /// Chance of rain, 0 to 100.
+    pub rain: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct Day {
+    /// 0 is Monday.
+    pub weekday: u32,
+    pub high: f64,
+    pub low: f64,
+    pub glyph: Glyph,
+    pub rain: f64,
+    pub uv: f64,
+    /// Seconds after local midnight.
+    pub sunrise: i32,
+    pub sunset: i32,
+}
+
 thread_local! {
+    static LOCATION: RefCell<Option<Location>> = RefCell::default();
+    static FORECAST: RefCell<Option<(Instant, Forecast)>> = RefCell::default();
     static CURRENT: RefCell<Option<Weather>> = RefCell::default();
     static LISTENERS: RefCell<Vec<Box<dyn Fn()>>> = RefCell::default();
 }
@@ -82,7 +151,7 @@ pub fn start() {
     });
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Location {
     city: String,
     lat: f64,
@@ -90,7 +159,7 @@ struct Location {
 }
 
 #[derive(Deserialize)]
-struct Forecast {
+struct Today {
     current: Current,
     daily: Daily,
 }
@@ -149,17 +218,27 @@ async fn geocode(query: &str) -> Result<Location, Box<dyn std::error::Error>> {
     Ok(Location { city: place.name.clone(), lat: place.latitude, lon: place.longitude })
 }
 
-async fn fetch() -> Result<Weather, Box<dyn std::error::Error>> {
-    let location = match config::WEATHER_LOCATION {
+/// Where to forecast for, looked up once.
+async fn location() -> Result<Location, Box<dyn std::error::Error>> {
+    if let Some(known) = LOCATION.with(|l| l.borrow().clone()) {
+        return Ok(known);
+    }
+    let location: Location = match config::WEATHER_LOCATION {
         "" => serde_json::from_str(&curl("http://ip-api.com/json/?fields=city,lat,lon").await?)?,
         place => geocode(place).await?,
     };
+    LOCATION.with(|l| *l.borrow_mut() = Some(location.clone()));
+    Ok(location)
+}
+
+async fn fetch() -> Result<Weather, Box<dyn std::error::Error>> {
+    let location = location().await?;
     let unit = if uses_fahrenheit() { "fahrenheit" } else { "celsius" };
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto&temperature_unit={unit}",
         location.lat, location.lon
     );
-    let forecast: Forecast = serde_json::from_str(&curl(&url).await?)?;
+    let forecast: Today = serde_json::from_str(&curl(&url).await?)?;
     let (condition, glyph) = describe(forecast.current.weather_code);
     let first = |times: &[String]| times.first().and_then(|t| seconds_of_day(t)).ok_or("missing sun times");
     Ok(Weather {
@@ -172,6 +251,124 @@ async fn fetch() -> Result<Weather, Box<dyn std::error::Error>> {
         high: forecast.daily.temperature_2m_max.first().map_or(0, |t| t.round() as i32),
         low: forecast.daily.temperature_2m_min.first().map_or(0, |t| t.round() as i32),
     })
+}
+
+#[derive(Deserialize)]
+struct FullForecast {
+    current: FullCurrent,
+    hourly: Hourly,
+    daily: FullDaily,
+}
+
+#[derive(Deserialize)]
+struct FullCurrent {
+    time: String,
+    temperature_2m: f64,
+    apparent_temperature: f64,
+    relative_humidity_2m: f64,
+    wind_speed_10m: f64,
+    wind_direction_10m: f64,
+    weather_code: u32,
+    is_day: u8,
+}
+
+#[derive(Deserialize)]
+struct Hourly {
+    time: Vec<String>,
+    temperature_2m: Vec<f64>,
+    weather_code: Vec<u32>,
+    precipitation_probability: Vec<Option<f64>>,
+    is_day: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+struct FullDaily {
+    time: Vec<String>,
+    weather_code: Vec<u32>,
+    temperature_2m_max: Vec<f64>,
+    temperature_2m_min: Vec<f64>,
+    precipitation_probability_max: Vec<Option<f64>>,
+    uv_index_max: Vec<Option<f64>>,
+    sunrise: Vec<String>,
+    sunset: Vec<String>,
+}
+
+/// The forecast, fetched unless one from the last few minutes will do.
+pub async fn forecast() -> Result<Forecast, Box<dyn std::error::Error>> {
+    if let Some(fresh) = FORECAST.with(|f| f.borrow().as_ref().filter(|(at, _)| at.elapsed() < FORECAST_FRESH).map(|(_, f)| f.clone())) {
+        return Ok(fresh);
+    }
+    let location = location().await?;
+    let fahrenheit = uses_fahrenheit();
+    let url = format!(
+        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&timezone=auto&forecast_days=7\
+         &current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day\
+         &hourly=temperature_2m,weather_code,precipitation_probability,is_day\
+         &daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset\
+         &temperature_unit={}&wind_speed_unit={}",
+        location.lat,
+        location.lon,
+        if fahrenheit { "fahrenheit" } else { "celsius" },
+        if fahrenheit { "mph" } else { "kmh" },
+    );
+    let raw: FullForecast = serde_json::from_str(&curl(&url).await?)?;
+    let forecast = assemble(raw, location.city, fahrenheit).ok_or("incomplete forecast")?;
+    FORECAST.with(|f| *f.borrow_mut() = Some((Instant::now(), forecast.clone())));
+    Ok(forecast)
+}
+
+fn assemble(raw: FullForecast, city: String, fahrenheit: bool) -> Option<Forecast> {
+    let (condition, glyph) = describe(raw.current.weather_code);
+    let now = Now {
+        temp: raw.current.temperature_2m,
+        feels_like: raw.current.apparent_temperature,
+        condition,
+        glyph,
+        day: raw.current.is_day == 1,
+        humidity: raw.current.relative_humidity_2m,
+        wind: raw.current.wind_speed_10m,
+        wind_from: raw.current.wind_direction_10m,
+        seconds: seconds_of_day(&raw.current.time)?,
+    };
+    // Hourly times are on the hour; start from the one that's under way.
+    let this_hour = raw.current.time.get(..13)?;
+    let start = raw.hourly.time.iter().position(|t| t.starts_with(this_hour))?;
+    let h = &raw.hourly;
+    let hours = (start..(start + HOURS).min(h.time.len()))
+        .map(|i| {
+            Some(Hour {
+                hour: h.time[i].get(11..13)?.parse().ok()?,
+                temp: *h.temperature_2m.get(i)?,
+                glyph: describe(*h.weather_code.get(i)?).1,
+                day: *h.is_day.get(i)? == 1,
+                rain: h.precipitation_probability.get(i).copied().flatten().unwrap_or(0.0),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let d = &raw.daily;
+    let days = (0..d.time.len())
+        .map(|i| {
+            Some(Day {
+                weekday: weekday(&d.time[i])?,
+                high: *d.temperature_2m_max.get(i)?,
+                low: *d.temperature_2m_min.get(i)?,
+                glyph: describe(*d.weather_code.get(i)?).1,
+                rain: d.precipitation_probability_max.get(i).copied().flatten().unwrap_or(0.0),
+                uv: d.uv_index_max.get(i).copied().flatten().unwrap_or(0.0),
+                sunrise: seconds_of_day(d.sunrise.get(i)?)?,
+                sunset: seconds_of_day(d.sunset.get(i)?)?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Forecast { city, unit: if fahrenheit { "°F" } else { "°C" }, wind_unit: if fahrenheit { "mph" } else { "km/h" }, now, hours, days })
+}
+
+/// The weekday of a date like "2026-11-11", 0 for Monday.
+fn weekday(date: &str) -> Option<u32> {
+    let mut parts = date.split('-').map(|p| p.parse::<i32>().ok());
+    let (y, m, d) = (parts.next()??, parts.next()??, parts.next()??);
+    let date = glib::DateTime::new(&glib::TimeZone::utc(), y, m, d, 0, 0, 0.0).ok()?;
+    Some(date.day_of_week() as u32 - 1)
 }
 
 /// Open-Meteo returns local times like "2026-11-11T07:02".

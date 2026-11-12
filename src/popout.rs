@@ -12,7 +12,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::anim::{self, Easing, MORPH, Tween};
 use crate::theme::{self, DIM, TextStyle};
-use crate::{config, mark};
+use crate::{config, hint, mark};
 
 const OPEN_MS: f64 = 260.0;
 const DROP: f64 = 8.0;
@@ -30,6 +30,8 @@ pub enum Anchor {
 pub struct Popout {
     window: gtk::ApplicationWindow,
     card: gtk::Box,
+    /// Hover hints float here, over the card.
+    hints: gtk::Fixed,
     openness: Rc<RefCell<Tween>>,
     open: Cell<bool>,
     monitor: RefCell<Option<gdk::Monitor>>,
@@ -54,9 +56,11 @@ impl Popout {
         let layers = gtk::Overlay::new();
         layers.set_child(Some(&catcher));
         layers.add_overlay(&card);
+        let hints = hint::layer();
+        layers.add_overlay(&hints);
         window.set_child(Some(&layers));
 
-        let popout = Rc::new(Self { window, card, openness: Tween::shared(OPEN_MS, MORPH), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0) });
+        let popout = Rc::new(Self { window, card, hints, openness: Tween::shared(OPEN_MS, MORPH), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0) });
 
         let click = gtk::GestureClick::new();
         click.connect_released({
@@ -96,6 +100,11 @@ impl Popout {
     /// The content scale on the monitor the popout opens on next.
     pub fn scale(&self) -> f64 {
         config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
+    }
+
+    /// The layer for hover hints over the card; see [`hint::float_below`].
+    pub fn hints(&self) -> &gtk::Fixed {
+        &self.hints
     }
 
     pub fn set_content(&self, content: &impl IsA<gtk::Widget>) {
