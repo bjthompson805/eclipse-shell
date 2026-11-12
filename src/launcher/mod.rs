@@ -125,7 +125,7 @@ impl Launcher {
             showing_help: Cell::new(false),
             screen: Cell::new((0.0, 0.0)),
             origin: Cell::new((0.0, 0.0)),
-            openness: Tween::shared(OPEN_MS, MORPH),
+            openness: Tween::closed(OPEN_MS, MORPH),
             height: Tween::shared(RESIZE_MS, MORPH),
             open: Cell::new(false),
             holding_blur: Cell::new(false),

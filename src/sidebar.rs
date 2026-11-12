@@ -93,7 +93,7 @@ impl Sidebar {
             stage,
             hints,
             content: RefCell::default(),
-            openness: Tween::shared(OPEN_MS, MORPH),
+            openness: Tween::closed(OPEN_MS, MORPH),
             open: Cell::new(false),
             monitor: RefCell::default(),
             in_panel: Cell::new(false),
@@ -303,9 +303,8 @@ impl Sidebar {
         if let Some(f) = self.on_open.borrow().as_ref() {
             f(true, s);
         }
-        // The slide starts once the panel is on screen (see the map
-        // handler): the first map takes long enough that a slide started
-        // here would be over before the first frame.
+        // A first open slides once the panel is on screen (see the map
+        // handler), so the slide isn't spent before the first frame.
         self.place(0.0);
         if self.window.is_mapped() {
             self.animate(1.0);

@@ -116,7 +116,7 @@ impl WallpaperSwitcher {
             window,
             layers,
             card_slot,
-            fade: Tween::shared(OPEN_MS, MORPH),
+            fade: Tween::closed(OPEN_MS, MORPH),
             open: Cell::new(false),
             monitor: RefCell::default(),
             cache: RefCell::default(),

@@ -106,7 +106,7 @@ impl Overview {
             layers,
             stage,
             hints,
-            fade: Tween::shared(FADE_MS, MORPH),
+            fade: Tween::closed(FADE_MS, MORPH),
             open: Cell::new(false),
             generation: Cell::new(0),
             monitor: RefCell::default(),

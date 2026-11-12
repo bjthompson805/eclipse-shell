@@ -64,6 +64,14 @@ impl Tween {
         Rc::new(RefCell::new(Self::new(duration_ms, easing)))
     }
 
+    /// A shared tween that starts at 0, for something that opens: unlike
+    /// [`Tween::shared`], its first target animates rather than jumping.
+    pub fn closed(duration_ms: f64, easing: Easing) -> Rc<RefCell<Self>> {
+        let tween = Self::shared(duration_ms, easing);
+        tween.borrow_mut().jump(0.0);
+        tween
+    }
+
     pub fn target(&self) -> f64 {
         self.target
     }

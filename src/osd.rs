@@ -78,7 +78,7 @@ impl Osd {
             }
         });
 
-        let osd = Rc::new(Self { window, row, fade: Tween::shared(FADE_MS, MORPH), generation: Cell::new(0), monitor: RefCell::default(), showing: Cell::new(false), caps_on: Cell::new(false), reads: Cell::new(0), num_on: Cell::new(false) });
+        let osd = Rc::new(Self { window, row, fade: Tween::closed(FADE_MS, MORPH), generation: Cell::new(0), monitor: RefCell::default(), showing: Cell::new(false), caps_on: Cell::new(false), reads: Cell::new(0), num_on: Cell::new(false) });
         if let Some((caps, num)) = lock_keys() {
             osd.caps_on.set(caps);
             osd.num_on.set(num);

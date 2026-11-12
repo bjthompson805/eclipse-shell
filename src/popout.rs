@@ -62,7 +62,7 @@ impl Popout {
         layers.add_overlay(&hints);
         window.set_child(Some(&layers));
 
-        let popout = Rc::new(Self { window, card, hints, openness: Tween::shared(OPEN_MS, MORPH), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0), pane: None });
+        let popout = Rc::new(Self { window, card, hints, openness: Tween::closed(OPEN_MS, MORPH), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0), pane: None });
 
         let click = gtk::GestureClick::new();
         click.connect_released({
@@ -96,7 +96,7 @@ impl Popout {
             window,
             card: gtk::Box::new(gtk::Orientation::Vertical, 0),
             hints: hints.clone(),
-            openness: Tween::shared(OPEN_MS, MORPH),
+            openness: Tween::closed(OPEN_MS, MORPH),
             open: Cell::new(false),
             monitor: RefCell::default(),
             top: Cell::new(0.0),
