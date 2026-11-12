@@ -95,6 +95,133 @@ pub fn focus_workspace(id: i32) {
     command("switching workspace", &format!("dispatch hl.dsp.focus({{ workspace = {id} }})"));
 }
 
+/// Focuses a window, switching to its workspace.
+pub fn focus_window(address: &str) {
+    command("focusing a window", &format!("dispatch hl.dsp.focus({{ window = \"address:{address}\" }})"));
+}
+
+/// Moves a window to a workspace, staying where we are.
+pub fn move_window(address: &str, workspace: i32) {
+    command("moving a window", &format!("dispatch hl.dsp.window.move({{ workspace = {workspace}, window = \"address:{address}\" }})"));
+}
+
+/// Where everything sits, for drawing workspaces as maps.
+#[derive(Clone, Debug, Default)]
+pub struct Layout {
+    pub monitors: Vec<Screen>,
+    /// Regular workspaces (positive ids), lowest first.
+    pub workspaces: Vec<Space>,
+    pub windows: Vec<Placed>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Screen {
+    pub name: String,
+    /// Logical px, as window positions are given.
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub active: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct Space {
+    pub id: i32,
+    pub monitor: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Placed {
+    pub address: String,
+    pub workspace: i32,
+    pub class: String,
+    pub title: String,
+    /// Logical px on the whole desktop.
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub floating: bool,
+}
+
+#[derive(Deserialize)]
+struct LayoutMonitor {
+    name: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    scale: f64,
+    #[serde(default)]
+    transform: i32,
+    #[serde(rename = "activeWorkspace")]
+    active_workspace: WorkspaceRef,
+}
+
+#[derive(Deserialize)]
+struct LayoutWorkspace {
+    id: i32,
+    monitor: String,
+}
+
+#[derive(Deserialize)]
+struct LayoutClient {
+    address: String,
+    #[serde(default)]
+    class: String,
+    #[serde(default)]
+    title: String,
+    workspace: WorkspaceRef,
+    at: [f64; 2],
+    size: [f64; 2],
+    #[serde(default)]
+    floating: bool,
+    #[serde(default = "yes")]
+    mapped: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+pub fn layout() -> io::Result<Layout> {
+    let json = |what: &str| -> io::Result<String> { request(&format!("j/{what}")) };
+    let parse_err = |e: serde_json::Error| io::Error::new(io::ErrorKind::InvalidData, e);
+    let monitors: Vec<LayoutMonitor> = serde_json::from_str(&json("monitors")?).map_err(parse_err)?;
+    let mut workspaces: Vec<LayoutWorkspace> = serde_json::from_str(&json("workspaces")?).map_err(parse_err)?;
+    let clients: Vec<LayoutClient> = serde_json::from_str(&json("clients")?).map_err(parse_err)?;
+    workspaces.retain(|w| w.id > 0);
+    workspaces.sort_by_key(|w| w.id);
+    Ok(Layout {
+        monitors: monitors
+            .into_iter()
+            .map(|m| {
+                // Sizes come in pixels; a quarter turn swaps them.
+                let (w, h) = (m.width / m.scale, m.height / m.scale);
+                let (width, height) = if m.transform % 2 == 1 { (h, w) } else { (w, h) };
+                Screen { name: m.name, x: m.x, y: m.y, width, height, active: m.active_workspace.id }
+            })
+            .collect(),
+        workspaces: workspaces.into_iter().map(|w| Space { id: w.id, monitor: w.monitor }).collect(),
+        windows: clients
+            .into_iter()
+            .filter(|c| c.mapped && c.workspace.id > 0)
+            .map(|c| Placed {
+                address: c.address,
+                workspace: c.workspace.id,
+                class: c.class,
+                title: c.title,
+                x: c.at[0],
+                y: c.at[1],
+                width: c.size[0],
+                height: c.size[1],
+                floating: c.floating,
+            })
+            .collect(),
+    })
+}
+
 /// Ends the Hyprland session.
 pub fn exit() {
     command("exiting", "dispatch hl.dsp.exit()");

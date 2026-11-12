@@ -92,6 +92,11 @@ impl Popout {
         self.open.get()
     }
 
+    /// The connector of the monitor the popout opens on next, e.g. "eDP-1".
+    pub fn connector(&self) -> Option<String> {
+        self.monitor.borrow().as_ref().and_then(|m| m.connector()).map(String::from)
+    }
+
     /// Logical width of the monitor the popout opens on next.
     pub fn monitor_width(&self) -> i32 {
         self.monitor.borrow().as_ref().map_or(1920, |m| m.geometry().width())

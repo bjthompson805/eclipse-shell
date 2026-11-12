@@ -31,6 +31,7 @@ mod weather;
 mod weather_popout;
 mod wifi;
 mod window_popout;
+mod workspaces_popout;
 
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
@@ -55,6 +56,7 @@ use traffic_popout::TrafficPopout;
 use usage_popout::UsagePopout;
 use weather_popout::WeatherPopout;
 use window_popout::WindowPopout;
+use workspaces_popout::WorkspacesPopout;
 
 /// GTK windows paint a theme background by default; this is the one rule
 /// needed to let the drawn surfaces show through.
@@ -74,6 +76,7 @@ struct Shell {
     media: Rc<MediaPopout>,
     weather: Rc<WeatherPopout>,
     traffic: Rc<TrafficPopout>,
+    workspaces: Rc<WorkspacesPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -102,6 +105,7 @@ impl Shell {
         self.media.set_monitor(focused.clone());
         self.weather.set_monitor(focused.clone());
         self.traffic.set_monitor(focused.clone());
+        self.workspaces.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -129,7 +133,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
     let (mixer, display_popout) = (shell_ref.mixer.clone(), shell_ref.display.clone());
     let (network, bluetooth, media) = (shell_ref.network.clone(), shell_ref.bluetooth.clone(), shell_ref.media.clone());
-    let (weather, traffic) = (shell_ref.weather.clone(), shell_ref.traffic.clone());
+    let (weather, traffic, spaces) = (shell_ref.weather.clone(), shell_ref.traffic.clone(), shell_ref.workspaces.clone());
     let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
@@ -143,6 +147,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         media: Rc::new(move |x| media.toggle(x)),
         weather: Rc::new(move |x| weather.toggle(x)),
         traffic: Rc::new(move |x| traffic.toggle(x)),
+        workspaces: Rc::new(move |x| spaces.toggle(x)),
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
         resources: Rc::new(move |x| resources.toggle(x)),
@@ -168,6 +173,7 @@ struct Surfaces {
     media: Rc<MediaPopout>,
     weather: Rc<WeatherPopout>,
     traffic: Rc<TrafficPopout>,
+    workspaces: Rc<WorkspacesPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -209,10 +215,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let media_popout = MediaPopout::new(app);
     let weather_popout = WeatherPopout::new(app);
     let traffic_popout = TrafficPopout::new(app);
+    let workspaces_popout = WorkspacesPopout::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -232,7 +239,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -338,6 +345,14 @@ fn main() -> glib::ExitCode {
                     let shell = surfaces.shell.borrow();
                     if let Some(x) = shell.focused_bar().and_then(Bar::traffic_x) {
                         surfaces.traffic.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-workspaces") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    if let Some(x) = shell.focused_bar().and_then(Bar::workspaces_x) {
+                        surfaces.workspaces.toggle(x);
                     }
                 }
             }

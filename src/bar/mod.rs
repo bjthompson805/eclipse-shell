@@ -49,6 +49,7 @@ pub struct Actions {
     pub media: Rc<dyn Fn(f64)>,
     pub weather: Rc<dyn Fn(f64)>,
     pub traffic: Rc<dyn Fn(f64)>,
+    pub workspaces: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
@@ -195,6 +196,11 @@ impl Bar {
         centre_x(self.anchors.traffic.as_ref()?)
     }
 
+    /// Where the workspace pills' centre sits.
+    pub fn workspaces_x(&self) -> Option<f64> {
+        centre_x(self.workspaces.widget.upcast_ref())
+    }
+
     /// Where the battery's centre sits, if the bar shows it.
     pub fn battery_x(&self) -> Option<f64> {
         self.anchors.battery.as_ref().filter(|b| b.is_visible()).and_then(centre_x)
@@ -301,6 +307,17 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         move || (actions.launcher)()
     });
     let spaces = Module::new(&workspaces.widget, ModuleSpec { interactive: false, ..pill(10.0 * s) });
+    // A left click on a pill switches to it; a right click opens the switcher.
+    let right_click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
+    right_click.connect_released({
+        let (actions, pills) = (actions.clone(), workspaces.widget.downgrade());
+        move |_, _, _, _| {
+            if let Some(x) = pills.upgrade().and_then(|p| centre_x(p.upcast_ref())) {
+                (actions.workspaces)(x);
+            }
+        }
+    });
+    spaces.widget.add_controller(right_click);
 
     let left = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_start(edge_margin).build();
     left.append(&mark.widget);
