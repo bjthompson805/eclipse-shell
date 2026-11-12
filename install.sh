@@ -10,6 +10,10 @@
 # power profiles, the battery charge limit and the Wi-Fi radio. The user may
 # run it, and only it, without a password.
 #
+# It also sets up the session: D-Bus, and a ConsoleKit session for every
+# console login, which polkit needs before it lets a file manager mount a
+# drive. Start the desktop with `dbus-run-session start-hyprland`.
+#
 # SPDX-License-Identifier: BSD-2-Clause
 set -eu
 
@@ -29,7 +33,7 @@ if command -v doas >/dev/null 2>&1; then as_root=doas; else as_root=sudo; fi
 
 # ---- packages ----------------------------------------------------------------
 
-packages="gtk4 gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp"
+packages="gtk4 gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks"
 if [ $system -eq 1 ]; then
 	# Ask for the password once, up front, so a missing tty fails here.
 	if [ "$as_root" = sudo ] && ! sudo -v; then
@@ -96,6 +100,16 @@ if [ ! -f /var/db/eclipse-charge-limit ]; then
 	/usr/local/libexec/eclipse-priv charge-limit probe || :
 fi
 sysrc -q eclipse_power_enable=YES >/dev/null
+
+# The session. Polkit lets a file manager mount a drive (through bsdisks)
+# without a password only in an active local session, which ConsoleKit
+# tracks; pam_ck_connector registers one for each console login.
+sysrc -q dbus_enable=YES >/dev/null
+if ! grep -q pam_ck_connector /etc/pam.d/login; then
+	cp -p /etc/pam.d/login /etc/pam.d/login.pre-eclipse
+	printf 'session\t\toptional\t/usr/local/lib/pam_ck_connector.so\n' >>/etc/pam.d/login
+	echo "  added a ConsoleKit session to console logins (/etc/pam.d/login)"
+fi
 ROOT
 fi
 

@@ -20,7 +20,8 @@ Early work in progress.
 FreeBSD (Linux probably works too, untested) running Hyprland with a Lua
 config. `install.sh` installs the rest: `gtk4`, `gtk4-layer-shell`, Rust,
 `curl`, wallust, the Papirus icon theme, JetBrainsMono Nerd Font, PipeWire and
-WirePlumber, plus Material Symbols Rounded from Google's repository.
+WirePlumber, D-Bus, ConsoleKit, polkit and bsdisks, plus Material Symbols
+Rounded from Google's repository.
 
 ## Install
 
@@ -33,8 +34,16 @@ From the checkout, as your desktop user:
 It installs missing packages, builds the shell into `~/.local/bin`, installs a
 small root helper for power profiles, the battery charge limit and the Wi-Fi
 radio (asking for your password through doas or sudo), and restarts the shell
-if it's running. Run it again after pulling to update. `./install.sh
---no-system` only builds and installs the shell.
+if it's running. It also enables D-Bus and gives each console login a
+ConsoleKit session, without which polkit won't let a file manager mount drives.
+Run it again after pulling to update. `./install.sh --no-system` only builds
+and installs the shell.
+
+Log in on a console and start the desktop with a session bus:
+
+```sh
+dbus-run-session start-hyprland
+```
 
 Start `eclipse-shell` when Hyprland starts (in an `hl.on("hyprland.start", ...)`
 handler), and bind the launcher to a key:
