@@ -131,7 +131,7 @@ fn split_top(args: &str) -> Option<(&str, &str)> {
 }
 
 /// The leading string literal of `text`, unquoted.
-fn string_literal(text: &str) -> Option<String> {
+pub(super) fn string_literal(text: &str) -> Option<String> {
     let text = text.trim_start();
     let q = text.chars().next().filter(|c| matches!(c, '"' | '\''))?;
     let body = &text[1..];

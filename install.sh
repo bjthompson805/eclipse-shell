@@ -112,6 +112,6 @@ fi
 
 echo "eclipse-shell is installed at ~/.local/bin/eclipse-shell"
 if ! grep -rqs 'eclipse-shell' "$HOME/.config/hypr"; then
-	echo "To start it with Hyprland, run 'eclipse-shell' from your autostart, and bind"
+	echo "To start it with Hyprland, run 'eclipse-shell' at Hyprland startup, and bind"
 	echo "'eclipse-shell toggle-launcher' to a key for the launcher."
 fi

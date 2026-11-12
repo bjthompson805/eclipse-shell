@@ -1,10 +1,11 @@
 //! The hub, `eclipse-shell hub`: the shell's settings app, a window of its
 //! own process. A rail of sections on the left, with a search across all of
-//! them; the section's settings on the right. Each change is saved to the
-//! settings file at once and takes effect when the shell restarts, which
-//! the footer offers. `eclipse-shell hub keybinds` opens on the keybind
-//! legend.
+//! them; the section's settings on the right. Each change is saved at
+//! once: the shell's own settings take effect when it restarts, which the
+//! footer offers, and Hyprland's (the Windows and Input pages) at once.
+//! `eclipse-shell hub <page>` opens on a page, e.g. `hub keybinds`.
 
+mod hypr;
 mod keybinds;
 
 use std::cell::{Cell, RefCell};
@@ -32,11 +33,14 @@ enum Page {
     Frame,
     Clock,
     Fonts,
+    Windows,
+    Input,
+    Startup,
     Keybinds,
 }
 
 impl Page {
-    const ALL: [Self; 6] = [Self::Bar, Self::Launcher, Self::Frame, Self::Clock, Self::Fonts, Self::Keybinds];
+    const ALL: [Self; 9] = [Self::Bar, Self::Launcher, Self::Frame, Self::Clock, Self::Fonts, Self::Windows, Self::Input, Self::Startup, Self::Keybinds];
 
     fn name(self) -> &'static str {
         match self {
@@ -45,6 +49,9 @@ impl Page {
             Self::Frame => "Frame",
             Self::Clock => "Clock & weather",
             Self::Fonts => "Fonts & scale",
+            Self::Windows => "Windows",
+            Self::Input => "Input",
+            Self::Startup => "Startup",
             Self::Keybinds => "Keybinds",
         }
     }
@@ -56,6 +63,9 @@ impl Page {
             Self::Frame => "crop_square",
             Self::Clock => "schedule",
             Self::Fonts => "text_fields",
+            Self::Windows => "select_window",
+            Self::Input => "mouse",
+            Self::Startup => "rocket_launch",
             Self::Keybinds => "keyboard",
         }
     }
@@ -67,6 +77,9 @@ impl Page {
             Self::Frame => "The frame drawn around the screen, whose top edge is the bar.",
             Self::Clock => "How times read, and where the weather comes from.",
             Self::Fonts => "Typefaces, icons, and the size of everything.",
+            Self::Windows => "How Hyprland lays out and draws windows. Changes apply at once.",
+            Self::Input => "Focus, pointer, touchpad and keyboard. Changes apply at once.",
+            Self::Startup => "What starts when you log in.",
             Self::Keybinds => "Every shortcut in your Hyprland config, read from binds.lua and user.lua.",
         }
     }
@@ -77,6 +90,22 @@ enum Control {
     /// A slider over `min..=max` in display units; the setting is the value over `per`.
     Number { get: fn(&Settings) -> f64, set: fn(&mut Settings, f64), min: f64, max: f64, per: f64, format: fn(f64) -> String },
     Text { get: fn(&Settings) -> &str, set: fn(&mut Settings, String), placeholder: &'static str },
+    /// A Hyprland option, by name; read live, applied at once.
+    Hypr(&'static str, Hypr),
+}
+
+enum Hypr {
+    Switch,
+    /// As [`Control::Number`]; written as an integer when Hyprland reports one.
+    Number { min: f64, max: f64, per: f64, format: fn(f64) -> String },
+    /// Labels and the values they set, as Hyprland spells them.
+    Choice(&'static [(&'static str, &'static str)]),
+}
+
+impl Hypr {
+    fn on(page: Page, label: &'static str, note: &'static str, name: &'static str, kind: Self) -> Row {
+        Row { page, label, note, control: Control::Hypr(name, kind) }
+    }
 }
 
 struct Row {
@@ -112,6 +141,14 @@ fn percent(v: f64) -> String {
     format!("{v}%")
 }
 
+fn plain(v: f64) -> String {
+    v.to_string()
+}
+
+fn signed(v: f64) -> String {
+    format!("{v:+}")
+}
+
 fn rows() -> Vec<Row> {
     use Page::*;
     let row = |page, label, note, control| Row { page, label, note, control };
@@ -143,11 +180,36 @@ fn rows() -> Vec<Row> {
         row(Fonts, "Mono font", "For numbers and labels in caps.", text!(mono_font, "JetBrainsMono Nerd Font")),
         row(Fonts, "Icon font", "For glyphs; a Material Symbols font.", text!(icon_font, "Material Symbols Rounded")),
         row(Fonts, "Icon theme", "For app icons.", text!(icon_theme, "Papirus-Dark")),
+        Hypr::on(Windows, "Layout", "Dwindle splits the space in two each time; master keeps one big window.", "general:layout", Hypr::Choice(&[("Dwindle", "dwindle"), ("Master", "master")])),
+        Hypr::on(Windows, "Inner gaps", "Between windows.", "general:gaps_in", Hypr::Number { min: 0.0, max: 40.0, per: 1.0, format: px_format }),
+        Hypr::on(Windows, "Outer gaps", "Between windows and the screen edge.", "general:gaps_out", Hypr::Number { min: 0.0, max: 60.0, per: 1.0, format: px_format }),
+        Hypr::on(Windows, "Border", "The coloured line round each window.", "general:border_size", Hypr::Number { min: 0.0, max: 8.0, per: 1.0, format: px_format }),
+        Hypr::on(Windows, "Rounding", "Window corner radius.", "decoration:rounding", Hypr::Number { min: 0.0, max: 30.0, per: 1.0, format: px_format }),
+        Hypr::on(Windows, "Corner shape", "2 is a circular corner; higher is squarer, like a squircle.", "decoration:rounding_power", Hypr::Number { min: 2.0, max: 10.0, per: 1.0, format: plain }),
+        Hypr::on(Windows, "Active opacity", "Of the focused window.", "decoration:active_opacity", Hypr::Number { min: 50.0, max: 100.0, per: 100.0, format: percent }),
+        Hypr::on(Windows, "Inactive opacity", "Of every other window.", "decoration:inactive_opacity", Hypr::Number { min: 50.0, max: 100.0, per: 100.0, format: percent }),
+        Hypr::on(Windows, "Dim inactive", "Darken windows without focus.", "decoration:dim_inactive", Hypr::Switch),
+        Hypr::on(Windows, "Blur", "Blur what shows through translucent windows.", "decoration:blur:enabled", Hypr::Switch),
+        Hypr::on(Windows, "Blur size", "How far each pass spreads.", "decoration:blur:size", Hypr::Number { min: 1.0, max: 20.0, per: 1.0, format: plain }),
+        Hypr::on(Windows, "Blur passes", "More passes are smoother and cost more.", "decoration:blur:passes", Hypr::Number { min: 1.0, max: 4.0, per: 1.0, format: plain }),
+        Hypr::on(Windows, "Shadows", "A shadow under each window.", "decoration:shadow:enabled", Hypr::Switch),
+        Hypr::on(Windows, "Shadow range", "How far it falls.", "decoration:shadow:range", Hypr::Number { min: 0.0, max: 100.0, per: 1.0, format: px_format }),
+        Hypr::on(Windows, "Resize on border", "Drag a window's edge to resize it.", "general:resize_on_border", Hypr::Switch),
+        Hypr::on(Input, "Focus", "Hover: focus follows the pointer. Click: a click moves focus. Loose: the pointer and keyboard focus stay apart.", "input:follow_mouse", Hypr::Choice(&[("Off", "0"), ("Hover", "1"), ("Click", "2"), ("Loose", "3")])),
+        Hypr::on(Input, "Pointer speed", "Added to the device's own acceleration.", "input:sensitivity", Hypr::Number { min: -100.0, max: 100.0, per: 100.0, format: signed }),
+        Hypr::on(Input, "Natural scrolling (mouse)", "Content moves with your fingers.", "input:natural_scroll", Hypr::Switch),
+        Hypr::on(Input, "Natural scrolling (touchpad)", "The same, on the touchpad.", "input:touchpad:natural_scroll", Hypr::Switch),
+        Hypr::on(Input, "Tap to click", "A tap on the touchpad clicks.", "input:touchpad:tap_to_click", Hypr::Switch),
+        Hypr::on(Input, "Two-finger right click", "Click with two fingers for a right click, instead of the pad's corner.", "input:touchpad:clickfinger_behavior", Hypr::Switch),
+        Hypr::on(Input, "Ignore touchpad while typing", "No stray clicks from a palm.", "input:touchpad:disable_while_typing", Hypr::Switch),
+        Hypr::on(Input, "Key repeat rate", "Repeats a second while a key is held.", "input:repeat_rate", Hypr::Number { min: 10.0, max: 60.0, per: 1.0, format: |v| format!("{v}/s") }),
+        Hypr::on(Input, "Key repeat delay", "How long a key is held before it repeats.", "input:repeat_delay", Hypr::Number { min: 150.0, max: 800.0, per: 1.0, format: |v| format!("{v}ms") }),
     ]
 }
 
 pub fn run(args: &[String]) -> glib::ExitCode {
-    let start = if args.iter().any(|a| a == "keybinds") { Page::Keybinds } else { Page::Bar };
+    // `hub windows`, `hub keybinds`: the page whose name starts with the word.
+    let start = args.first().and_then(|a| Page::ALL.into_iter().find(|p| p.name().to_lowercase().starts_with(&a.to_lowercase()))).unwrap_or(Page::Bar);
     let app = gtk::Application::builder().application_id(APP_ID).build();
     let shown: Rc<RefCell<Option<Rc<Hub>>>> = Rc::default();
     app.connect_activate(move |app| {
@@ -387,6 +449,8 @@ impl Hub {
             self.about.set_text(page.about());
             if page == Page::Keybinds {
                 self.show_binds(|_| true);
+            } else if page == Page::Startup {
+                self.show_startup();
             } else {
                 self.show_rows(|r| r.page == page);
             }
@@ -476,6 +540,7 @@ impl Hub {
                     }
                 });
                 slider.set_size_request((CONTROL_W * s).round() as i32, -1);
+                slider.set_hexpand(false);
                 slider.set_valign(gtk::Align::Center);
                 slider.upcast()
             }
@@ -493,7 +558,173 @@ impl Hub {
                 field.set_valign(gtk::Align::Center);
                 field.upcast()
             }
+            Control::Hypr(name, kind) => self.hypr_control(name, kind),
         }
+    }
+
+    fn hypr_control(self: &Rc<Self>, name: &'static str, kind: &Hypr) -> gtk::Widget {
+        let s = self.s;
+        let Some(value) = hypr::live(name) else {
+            return TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label("Not available").upcast();
+        };
+        let hub = Rc::downgrade(self);
+        match kind {
+            Hypr::Switch => {
+                let on = value.as_bool().or_else(|| value.as_i64().map(|i| i != 0)).unwrap_or(false);
+                popout::switch(s, on, true, move || {
+                    if let Some(hub) = hub.upgrade() {
+                        hypr::set(name, (!on).into());
+                        hub.show_content();
+                        hub.show_footer();
+                    }
+                })
+                .upcast()
+            }
+            Hypr::Number { min, max, per, format } => {
+                let (integer, per) = (value.is_i64(), *per);
+                let shown = (value.as_f64().unwrap_or(*min / per) * per).round();
+                let slider = ui::slider(s, "", *min, *max, shown, *format, move |v| {
+                    let v = v / per;
+                    hypr::set(name, if integer { (v.round() as i64).into() } else { v.into() });
+                    if let Some(hub) = hub.upgrade() {
+                        hub.show_footer();
+                    }
+                });
+                slider.set_size_request((CONTROL_W * s).round() as i32, -1);
+                slider.set_hexpand(false);
+                slider.set_valign(gtk::Align::Center);
+                slider.upcast()
+            }
+            Hypr::Choice(options) => {
+                let current = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
+                let chosen = options.iter().position(|(_, v)| *v == current).unwrap_or(usize::MAX);
+                let labels: Vec<&str> = options.iter().map(|(l, _)| *l).collect();
+                let (options, numeric) = (*options, value.is_number());
+                let row = ui::segmented(s, &labels, chosen, move |i| {
+                    let picked = options[i].1;
+                    let v = if numeric { picked.parse::<i64>().map_or_else(|_| picked.into(), Into::into) } else { picked.into() };
+                    hypr::set(name, v);
+                    if let Some(hub) = hub.upgrade() {
+                        hub.show_content();
+                        hub.show_footer();
+                    }
+                });
+                row.set_valign(gtk::Align::Center);
+                row.upcast()
+            }
+        }
+    }
+
+    fn show_startup(self: &Rc<Self>) {
+        let s = self.s;
+        let px = |v: f64| (v * s).round() as i32;
+        let line = || {
+            let line = gtk::Box::new(gtk::Orientation::Horizontal, px(12.0));
+            line.set_margin_start(px(16.0));
+            line.set_margin_end(px(12.0));
+            line.set_margin_top(px(8.0));
+            line.set_margin_bottom(px(8.0));
+            line
+        };
+        let command_label = |text: &str, color| {
+            let label = TextStyle::new(10.5 * s, pango::Weight::Medium, color).mono().label(text);
+            popout::fill(&label);
+            label.set_valign(gtk::Align::Center);
+            label
+        };
+
+        // Added here: removable, runnable, and a field to add another.
+        self.content.append(&popout::eyebrow(s, "Added here"));
+        let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let commands = hypr::startup();
+        for (i, command) in commands.iter().enumerate() {
+            let row = line();
+            row.append(&command_label(command, CREAM));
+            let hub = Rc::downgrade(self);
+            let run = command.clone();
+            row.append(&icon_button(s, "play_arrow", "Run now", move || {
+                hypr::run(&run);
+                if let Some(hub) = hub.upgrade() {
+                    hub.flash(&format!("Started {run}"));
+                }
+            }));
+            let hub = Rc::downgrade(self);
+            row.append(&icon_button(s, "close", "Remove", move || {
+                let mut commands = hypr::startup();
+                if i < commands.len() {
+                    commands.remove(i);
+                    hypr::set_startup(&commands);
+                }
+                if let Some(hub) = hub.upgrade() {
+                    hub.show_content();
+                }
+            }));
+            list.append(&row);
+            list.append(&popout::divider());
+        }
+        let add = line();
+        let (field, text) = ui::field(s, "add", "A command to start at login, e.g. nm-applet");
+        add.append(&field);
+        let submit = {
+            let (hub, text) = (Rc::downgrade(self), text.downgrade());
+            Rc::new(move || {
+                let (Some(hub), Some(text)) = (hub.upgrade(), text.upgrade()) else { return };
+                let command = text.text().trim().to_owned();
+                if command.is_empty() {
+                    return;
+                }
+                let mut commands = hypr::startup();
+                if !commands.contains(&command) {
+                    commands.push(command);
+                    hypr::set_startup(&commands);
+                }
+                hub.show_content();
+            })
+        };
+        text.connect_activate({
+            let submit = submit.clone();
+            move |_| submit()
+        });
+        add.append(&ui::button(s, Some("add"), "Add", true, true, move || submit()));
+        list.append(&add);
+        self.content.append(&popout::card(&list));
+        let note = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label("Starts at your next login. Run one now with ▶.");
+        note.set_xalign(0.0);
+        note.set_margin_start(px(4.0));
+        self.content.append(&note);
+
+        // From the config files: shown, not edited here.
+        let configured = hypr::configured_startup();
+        if !configured.is_empty() {
+            self.content.append(&popout::eyebrow(s, "From your config"));
+            let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            for (i, (command, file)) in configured.iter().enumerate() {
+                if i > 0 {
+                    list.append(&popout::divider());
+                }
+                let row = line();
+                row.append(&command_label(command, SUBTLE));
+                row.append(&TextStyle::new(9.0 * s, pango::Weight::Medium, FAINT).mono().label(file));
+                list.append(&row);
+            }
+            self.content.append(&popout::card(&list));
+        }
+    }
+
+    /// Shows `text` in the footer for a moment.
+    fn flash(self: &Rc<Self>, text: &str) {
+        while let Some(c) = self.footer.first_child() {
+            self.footer.remove(&c);
+        }
+        let label = TextStyle::new(10.0 * self.s, pango::Weight::Medium, SUBTLE).label(text);
+        popout::fill(&label);
+        self.footer.append(&label);
+        let hub = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_secs(3), move || {
+            if let Some(hub) = hub.upgrade() {
+                hub.show_footer();
+            }
+        });
     }
 
     /// Appends a card per keybind group of the binds `keep` picks; returns how many.
@@ -560,6 +791,32 @@ impl Hub {
         let s = self.s;
         while let Some(c) = self.footer.first_child() {
             self.footer.remove(&c);
+        }
+        if self.query.borrow().is_empty() && self.page.get() == Page::Startup {
+            let status = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label("Kept in ~/.config/hypr/eclipse.lua with the hub's other Hyprland changes.");
+            popout::fill(&status);
+            self.footer.append(&status);
+            return;
+        }
+        if self.query.borrow().is_empty() && matches!(self.page.get(), Page::Windows | Page::Input) {
+            let changed = !hypr::overrides().is_empty();
+            let status = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label("Changes apply at once and are kept in ~/.config/hypr/eclipse.lua.");
+            popout::fill(&status);
+            status.set_valign(gtk::Align::Center);
+            self.footer.append(&status);
+            let hub = Rc::downgrade(self);
+            self.footer.append(&ui::button(s, Some("undo"), "Undo hub changes", false, changed, move || {
+                hypr::reset();
+                // Read back once the reload has settled.
+                let hub = hub.clone();
+                glib::timeout_add_local_once(Duration::from_millis(300), move || {
+                    if let Some(hub) = hub.upgrade() {
+                        hub.show_content();
+                        hub.show_footer();
+                    }
+                });
+            }));
+            return;
         }
         let pending = *self.settings.borrow() != *self.running.borrow();
         let text = if self.restarting.get() {
@@ -645,4 +902,23 @@ fn keycap(s: f64, key: &str) -> gtk::Overlay {
     cap.set_measure_overlay(&text, true);
     cap.set_valign(gtk::Align::Center);
     cap
+}
+
+/// A glyph that lights on hover and does `pressed` on a click; `hint` names it.
+fn icon_button(s: f64, glyph: &str, hint: &str, pressed: impl Fn() + 'static) -> gtk::Label {
+    let icon = theme::icon_glyph(glyph, 17.0 * s, theme::ICON_DIM);
+    icon.set_valign(gtk::Align::Center);
+    icon.set_accessible_role(gtk::AccessibleRole::Button);
+    icon.update_property(&[gtk::accessible::Property::Label(hint)]);
+    popout::on_hover(&icon, {
+        let (icon, glyph) = (icon.downgrade(), glyph.to_owned());
+        move |inside| {
+            if let Some(icon) = icon.upgrade() {
+                let color = if inside { theme::palette().accent_lit } else { theme::ICON_DIM };
+                icon.set_attributes(theme::icon_glyph(&glyph, 17.0 * s, color).attributes().as_ref());
+            }
+        }
+    });
+    popout::on_click(&icon, pressed);
+    icon
 }

@@ -36,8 +36,8 @@ radio (asking for your password through doas or sudo), and restarts the shell
 if it's running. Run it again after pulling to update. `./install.sh
 --no-system` only builds and installs the shell.
 
-Start `eclipse-shell` from your Hyprland autostart, and bind the launcher to a
-key:
+Start `eclipse-shell` when Hyprland starts (in an `hl.on("hyprland.start", ...)`
+handler), and bind the launcher to a key:
 
 ```sh
 eclipse-shell toggle-launcher
