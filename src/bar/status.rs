@@ -152,7 +152,7 @@ pub fn status(s: f64) -> gtk::Box {
                 }
                 let tick = glib::timeout_future(POLL);
                 let woken = wakeups.recv();
-                futures_select(tick, woken).await;
+                super::first_of(tick, woken).await;
             }
         }
     });
@@ -261,20 +261,6 @@ async fn run(script: &str) -> Option<String> {
     .ok()?;
     let (stdout, _) = process.communicate_utf8_future(None).await.ok()?;
     stdout.map(String::from)
-}
-
-/// Waits for whichever finishes first.
-async fn futures_select(a: impl std::future::Future<Output = ()>, b: impl std::future::Future) {
-    let (a, b) = (std::pin::pin!(a), std::pin::pin!(b));
-    let mut both = (a, b);
-    std::future::poll_fn(|cx| {
-        if both.0.as_mut().poll(cx).is_ready() || both.1.as_mut().poll(cx).is_ready() {
-            std::task::Poll::Ready(())
-        } else {
-            std::task::Poll::Pending
-        }
-    })
-    .await
 }
 
 fn parse(text: &str) -> Reading {

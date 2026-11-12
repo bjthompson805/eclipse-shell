@@ -144,23 +144,7 @@ impl Calendar {
             column.append(&footer);
         }
 
-        // The card surface under the content.
-        let card = gtk::Overlay::new();
-        let surface = gtk::DrawingArea::new();
-        surface.set_draw_func(|_, cr, w, h| {
-            let palette = theme::palette();
-            let (w, h) = (f64::from(w), f64::from(h));
-            theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, crate::config::LAUNCHER_RADIUS);
-            theme::set_source(cr, palette.base);
-            let _ = cr.fill_preserve();
-            cr.set_line_width(1.0);
-            theme::set_source(cr, palette.outline);
-            let _ = cr.stroke();
-        });
-        card.set_child(Some(&surface));
-        card.add_overlay(&column);
-        card.set_measure_overlay(&column, true);
-        card
+        popout::card(&column)
     }
 
     /// Weekday initials over the day cells, all drawn in one area that

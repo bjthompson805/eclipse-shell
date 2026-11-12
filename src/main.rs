@@ -1,3 +1,4 @@
+mod agent_usage;
 mod anim;
 mod bar;
 mod calendar;
@@ -11,6 +12,7 @@ mod popout;
 mod power;
 mod theme;
 mod tray;
+mod usage_popout;
 mod weather;
 
 use std::cell::{OnceCell, RefCell};
@@ -20,11 +22,12 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use gtk4 as gtk;
 
-use bar::Bar;
+use bar::{Actions, Bar};
 use calendar::Calendar;
 use hyprland::State;
 use launcher::Launcher;
 use power::Power;
+use usage_popout::UsagePopout;
 
 /// GTK windows paint a theme background by default; this is the one rule
 /// needed to let the drawn surfaces show through.
@@ -36,6 +39,7 @@ struct Shell {
     launcher: Rc<Launcher>,
     power: Rc<Power>,
     calendar: Rc<Calendar>,
+    usage: Rc<UsagePopout>,
 }
 
 impl Shell {
@@ -46,7 +50,8 @@ impl Shell {
         let focused = monitor_named(display, self.state.focused_monitor.as_deref());
         self.launcher.set_monitor(focused.clone());
         self.power.set_monitor(focused.clone());
-        self.calendar.set_monitor(focused);
+        self.calendar.set_monitor(focused.clone());
+        self.usage.set_monitor(focused);
     }
 }
 
@@ -68,16 +73,17 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
     for bar in shell_ref.bars.drain(..) {
         bar.destroy();
     }
-    let launcher = shell_ref.launcher.clone();
-    let toggle: Rc<dyn Fn()> = Rc::new(move || launcher.toggle());
-    let power = shell_ref.power.clone();
-    let toggle_power: Rc<dyn Fn()> = Rc::new(move || power.toggle());
-    let calendar = shell_ref.calendar.clone();
-    let toggle_calendar: Rc<dyn Fn(f64)> = Rc::new(move |x| calendar.toggle(x));
+    let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
+    let actions = Rc::new(Actions {
+        launcher: Rc::new(move || launcher.toggle()),
+        power: Rc::new(move || power.toggle()),
+        calendar: Rc::new(move |x| calendar.toggle(x)),
+        usage: Rc::new(move |x| usage.toggle(x)),
+    });
     let monitors = display.monitors();
     shell_ref.bars = (0..monitors.n_items())
         .filter_map(|i| monitors.item(i).and_downcast::<gdk::Monitor>())
-        .map(|monitor| Bar::new(app, &monitor, toggle.clone(), toggle_power.clone(), toggle_calendar.clone()))
+        .map(|monitor| Bar::new(app, &monitor, &actions))
         .collect();
     shell_ref.refresh(display);
 }
@@ -87,6 +93,7 @@ struct Surfaces {
     launcher: Rc<Launcher>,
     power: Rc<Power>,
     calendar: Rc<Calendar>,
+    usage: Rc<UsagePopout>,
     shell: Rc<RefCell<Shell>>,
 }
 
@@ -108,11 +115,13 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     weather::start();
     tray::start();
     media::start();
+    agent_usage::start();
 
     let launcher = Launcher::new(app);
     let power = Power::new(app);
     let calendar = Calendar::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone() }));
+    let usage = UsagePopout::new(app);
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -132,7 +141,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, shell })
+    Some(Surfaces { launcher, power, calendar, usage, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -174,6 +183,16 @@ fn main() -> glib::ExitCode {
                     match bar.and_then(Bar::clock_x) {
                         Some(x) => surfaces.calendar.toggle(x),
                         None => surfaces.calendar.toggle_centred(),
+                    }
+                }
+            }
+            Some("toggle-usage") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    let focused = shell.state.focused_monitor.as_deref();
+                    let bar = shell.bars.iter().find(|b| b.connector.as_deref() == focused).or(shell.bars.first());
+                    if let Some(x) = bar.and_then(Bar::usage_x) {
+                        surfaces.usage.toggle(x);
                     }
                 }
             }

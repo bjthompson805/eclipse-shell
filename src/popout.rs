@@ -175,3 +175,23 @@ pub fn eyebrow(s: f64, label: &str) -> gtk::Box {
     row.append(&TextStyle::new(9.5 * s, gtk::pango::Weight::Semibold, DIM).mono().tracking(2.6 * s).label(&label.to_uppercase()));
     row
 }
+
+/// The card surface, rounded and outlined, behind `content`.
+pub fn card(content: &impl IsA<gtk::Widget>) -> gtk::Overlay {
+    let surface = gtk::DrawingArea::new();
+    surface.set_draw_func(|_, cr, w, h| {
+        let palette = theme::palette();
+        let (w, h) = (f64::from(w), f64::from(h));
+        theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, config::LAUNCHER_RADIUS);
+        theme::set_source(cr, palette.base);
+        let _ = cr.fill_preserve();
+        cr.set_line_width(1.0);
+        theme::set_source(cr, palette.outline);
+        let _ = cr.stroke();
+    });
+    let card = gtk::Overlay::new();
+    card.set_child(Some(&surface));
+    card.add_overlay(content);
+    card.set_measure_overlay(content, true);
+    card
+}

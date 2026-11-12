@@ -34,16 +34,26 @@ use module::{Module, ModuleSpec};
 use title::Title;
 use workspaces::Workspaces;
 
+/// What the bar's buttons open. The f64 is the button's centre, for
+/// popouts that drop beneath it.
+pub struct Actions {
+    pub launcher: Rc<dyn Fn()>,
+    pub power: Rc<dyn Fn()>,
+    pub calendar: Rc<dyn Fn(f64)>,
+    pub usage: Rc<dyn Fn(f64)>,
+}
+
 pub struct Bar {
     pub connector: Option<String>,
     windows: [gtk::ApplicationWindow; 2],
     workspaces: Rc<Workspaces>,
     title: Rc<Title>,
     clock: gtk::Widget,
+    usage: Option<gtk::Widget>,
 }
 
 impl Bar {
-    pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>, on_clock: Rc<dyn Fn(f64)>) -> Self {
+    pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, actions: &Rc<Actions>) -> Self {
         let s = config::bar_scale(monitor.geometry().height());
         let band = config::BAR_HEIGHT * s;
         let top = config::FRAME_EDGE + band;
@@ -86,7 +96,7 @@ impl Bar {
 
         let workspaces = Workspaces::new(s);
         let title = Title::new(s);
-        let content = band_content(s, band, &workspaces, &title, on_mark, on_power, on_clock);
+        let (content, usage) = band_content(s, band, &workspaces, &title, actions);
         content.set_size_request(-1, top.round() as i32);
 
         let layers = gtk::Overlay::new();
@@ -98,7 +108,7 @@ impl Bar {
         frame.present();
         // The clock floats as the band's last overlay.
         let clock = content.last_child().expect("clock");
-        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title, clock }
+        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title, clock, usage }
     }
 
     pub fn update(&self, state: &State) {
@@ -109,6 +119,11 @@ impl Bar {
     /// Where the clock's centre sits, in logical px from the monitor's left.
     pub fn clock_x(&self) -> Option<f64> {
         centre_x(&self.clock)
+    }
+
+    /// Where the usage readout's centre sits, if the bar shows it.
+    pub fn usage_x(&self) -> Option<f64> {
+        centre_x(self.usage.as_ref()?)
     }
 
     pub fn destroy(&self) {
@@ -124,6 +139,20 @@ fn centre_x(widget: &gtk::Widget) -> Option<f64> {
     let root = widget.root()?;
     let point = widget.compute_point(&root, &gtk::graphene::Point::new(widget.width() as f32 / 2.0, 0.0))?;
     Some(f64::from(point.x()))
+}
+
+/// Waits for whichever finishes first.
+pub(crate) async fn first_of(a: impl std::future::Future<Output = ()>, b: impl std::future::Future) {
+    let (a, b) = (std::pin::pin!(a), std::pin::pin!(b));
+    let mut both = (a, b);
+    std::future::poll_fn(|cx| {
+        if both.0.as_mut().poll(cx).is_ready() || both.1.as_mut().poll(cx).is_ready() {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await
 }
 
 fn layer_window(app: &gtk::Application, monitor: &gdk::Monitor, namespace: &str) -> gtk::ApplicationWindow {
@@ -180,13 +209,16 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>, on_clock: Rc<dyn Fn(f64)>) -> gtk::Overlay {
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>) -> (gtk::Overlay, Option<gtk::Widget>) {
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
     let pill = |pad_x: f64| ModuleSpec { span, pad_x, filled: true, interactive: true, square: false };
 
     let mark = Module::new(&mark::mark(11.0 * s), ModuleSpec { filled: false, square: true, ..pill(0.0) });
-    mark.connect_tapped(move || on_mark());
+    mark.connect_tapped({
+        let actions = actions.clone();
+        move || (actions.launcher)()
+    });
     let spaces = Module::new(&workspaces.widget, ModuleSpec { interactive: false, ..pill(10.0 * s) });
 
     let left = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_start(edge_margin).build();
@@ -196,18 +228,27 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let stats = Module::new(&stats::stats(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
         left.append(&stats.widget);
     }
-    if config::BAR_AGENT_USAGE {
-        let usage = Module::new(&agent_usage::agent_usage(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
+    let usage_widget = config::BAR_AGENT_USAGE.then(|| {
+        let usage = Module::new(&agent_usage::agent_usage(s), pill(6.0 * s));
+        usage.connect_tapped({
+            let (widget, actions) = (usage.widget.downgrade(), actions.clone());
+            move || {
+                if let Some(x) = widget.upgrade().and_then(|w| centre_x(w.upcast_ref())) {
+                    (actions.usage)(x);
+                }
+            }
+        });
         left.append(&usage.widget);
-    }
+        usage.widget.upcast::<gtk::Widget>()
+    });
     left.append(&title.widget);
 
     let clock = Module::new(&clock::clock(s), pill(13.0 * s));
     clock.connect_tapped({
-        let widget = clock.widget.downgrade();
+        let (widget, actions) = (clock.widget.downgrade(), actions.clone());
         move || {
             if let Some(x) = widget.upgrade().and_then(|w| centre_x(w.upcast_ref())) {
-                on_clock(x);
+                (actions.calendar)(x);
             }
         }
     });
@@ -224,7 +265,10 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         }
     });
     let power = Module::new(&power_icon, pill(10.0 * s));
-    power.connect_tapped(move || on_power());
+    power.connect_tapped({
+        let actions = actions.clone();
+        move || (actions.power)()
+    });
 
     let right = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_end(edge_margin).build();
     if config::BAR_MEDIA {
@@ -284,5 +328,5 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let x = (width / 2 - cw / 2).min(highest).max(lowest);
         Some(gdk::Rectangle::new(x, 0, cw, height))
     });
-    content
+    (content, usage_widget)
 }
