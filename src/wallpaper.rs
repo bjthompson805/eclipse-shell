@@ -192,25 +192,30 @@ fn state_dir() -> PathBuf {
 
 /// Shows `path` and themes the desktop from it.
 pub fn set(path: &Path) {
-    static WORKER: OnceLock<mpsc::Sender<PathBuf>> = OnceLock::new();
+    set_with(path, true);
+}
+
+/// Shows `path`; with `theme` false the colours stay as they are.
+pub fn set_with(path: &Path, theme: bool) {
+    static WORKER: OnceLock<mpsc::Sender<(PathBuf, bool)>> = OnceLock::new();
     let worker = WORKER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<PathBuf>();
+        let (tx, rx) = mpsc::channel::<(PathBuf, bool)>();
         std::thread::spawn(move || {
-            while let Ok(mut path) = rx.recv() {
+            while let Ok(mut job) = rx.recv() {
                 // A burst of picks: only the last one matters.
                 while let Ok(newer) = rx.try_recv() {
-                    path = newer;
+                    job = newer;
                 }
-                apply(&path);
+                apply(&job.0, job.1);
             }
         });
         tx
     });
-    let _ = worker.send(path.to_owned());
+    let _ = worker.send((path.to_owned(), theme));
 }
 
 /// Runs on the worker thread.
-fn apply(path: &Path) {
+fn apply(path: &Path, theme: bool) {
     let Some(still) = still(path) else {
         eprintln!("eclipse-shell: no still for {}", path.display());
         return;
@@ -235,6 +240,9 @@ fn apply(path: &Path) {
     }
     let _ = std::fs::create_dir_all(state_dir());
     let _ = std::fs::write(state_dir().join("wallpaper"), format!("{}\n", path.display()));
+    if !theme {
+        return;
+    }
     let quiet = |program: &str| {
         let mut command = Command::new(program);
         command.stdout(Stdio::null()).stderr(Stdio::null());

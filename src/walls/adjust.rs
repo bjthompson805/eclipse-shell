@@ -205,7 +205,7 @@ impl Adjust {
             }
             a.walls.set_status(&format!("Saved {}", out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
             if then_set {
-                a.walls.set_wallpaper(&out);
+                a.walls.set_wallpaper(&out, false);
             }
             a.walls.back(Some(out));
         });

@@ -1,4 +1,4 @@
-//! Tune colours: wallust options for one wallpaper, previewed before they
+//! Tune palette: wallust options for one wallpaper, previewed before they
 //! touch the desktop. wallust runs in a scratch cache with templates and
 //! terminal sequences off and prints the scheme; the preview shows the 16
 //! colours and the shell's frame and bar drawn in them over the picture.
@@ -83,7 +83,7 @@ pub fn show(walls: &Rc<Walls>, path: &Path) {
     });
 
     let side = &walls.side;
-    side.append(&header(walls, "Tune colours", path));
+    side.append(&header(walls, "Tune palette", path));
     tune.preview.set_draw_func({
         let tune = Rc::downgrade(&tune);
         move |_, cr, w, h| {
@@ -111,7 +111,7 @@ pub fn show(walls: &Rc<Walls>, path: &Path) {
         move || {
             if let Some(t) = tune.upgrade() {
                 wallpaper::save_tune(&t.path, Some(t.options.borrow().to_json()));
-                t.walls.set_wallpaper(&t.path);
+                t.walls.set_wallpaper(&t.path, false);
                 t.walls.back(None);
             }
         }

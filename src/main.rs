@@ -516,13 +516,17 @@ fn main() -> glib::ExitCode {
                 }
             }
             Some("wallpaper-next") => wallpaper::next(),
-            Some("wallpaper-set") => match args.get(2) {
-                Some(path) => wallpaper::set(&command_line.create_file_for_arg(path).path().unwrap_or_else(|| path.into())),
-                None => {
-                    command_line.printerr_literal("usage: eclipse-shell wallpaper-set <file>\n");
-                    return glib::ExitCode::FAILURE;
+            Some("wallpaper-set") => {
+                // --keep-colours: show it without re-theming the desktop.
+                let keep = args.iter().any(|a| a == "--keep-colours");
+                match args.iter().skip(2).find(|a| *a != "--keep-colours") {
+                    Some(path) => wallpaper::set_with(&command_line.create_file_for_arg(path).path().unwrap_or_else(|| path.into()), !keep),
+                    None => {
+                        command_line.printerr_literal("usage: eclipse-shell wallpaper-set [--keep-colours] <file>\n");
+                        return glib::ExitCode::FAILURE;
+                    }
                 }
-            },
+            }
             Some("toggle-power") => {
                 if let Some(surfaces) = surfaces.get() {
                     surfaces.power.toggle();

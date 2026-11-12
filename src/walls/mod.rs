@@ -81,6 +81,8 @@ pub struct Walls {
     downloading: Cell<bool>,
     /// Armed by a first click on Delete.
     confirm_delete: Cell<bool>,
+    /// What's set as the wallpaper, as far as this window knows.
+    current_wall: RefCell<Option<PathBuf>>,
     /// The open tool (Tune or Adjust), held while it shows.
     tool: RefCell<Option<Rc<dyn std::any::Any>>>,
     screen: (i32, i32),
@@ -150,6 +152,7 @@ impl Walls {
             preview: RefCell::default(),
             downloading: Cell::new(false),
             confirm_delete: Cell::new(false),
+            current_wall: RefCell::new(wallpaper::recorded()),
             tool: RefCell::default(),
             screen: (sw, sh),
         });
@@ -550,54 +553,65 @@ impl Walls {
         };
         let busy = self.downloading.get();
         let walls = Rc::downgrade(self);
-        if item.source.remote() {
-            let saved = item.saved();
-            let w2 = walls.clone();
-            place(ui::button(s, Some("wallpaper"), "Set as wallpaper", true, !busy, move || {
-                if let Some(w) = w2.upgrade() {
-                    w.download(true);
-                }
-            }));
-            place(ui::button(s, Some(if saved { "check" } else { "download" }), if saved { "In library" } else { "Download" }, false, !busy && !saved, move || {
-                if let Some(w) = walls.upgrade() {
-                    w.download(false);
-                }
-            }));
-        } else {
-            let path = item.local.clone().unwrap_or_default();
-            let set_path = path.clone();
-            place(ui::button(s, Some("wallpaper"), "Set as wallpaper", true, true, {
-                let walls = walls.clone();
-                move || {
-                    if let Some(w) = walls.upgrade() {
-                        w.set_wallpaper(&set_path);
+        // A site's wallpaper, once downloaded, is a library file like any other.
+        let file = item.local.clone().or_else(|| item.saved().then(|| item.target()));
+        let current = file.is_some() && *self.current_wall.borrow() == file;
+        if current {
+            place(ui::button(s, Some("check"), "Current wallpaper", false, false, || {}));
+        }
+        match file {
+            None => {
+                let w2 = walls.clone();
+                place(ui::button(s, Some("wallpaper"), "Set as wallpaper", true, !busy, move || {
+                    if let Some(w) = w2.upgrade() {
+                        w.download(true);
                     }
-                }
-            }));
-            place(ui::button(s, Some("palette"), "Tune colours", false, true, {
-                let (walls, path) = (walls.clone(), path.clone());
-                move || {
+                }));
+                place(ui::button(s, Some("download"), "Download", false, !busy, move || {
                     if let Some(w) = walls.upgrade() {
-                        w.clear_side();
-                        tune::show(&w, &path);
+                        w.download(false);
                     }
+                }));
+            }
+            Some(path) => {
+                let set_path = path.clone();
+                // Sites' wallpapers keep the colours; Tune palette applies some.
+                let keep = item.source.remote();
+                if !current {
+                    place(ui::button(s, Some("wallpaper"), "Set as wallpaper", true, true, {
+                        let walls = walls.clone();
+                        move || {
+                            if let Some(w) = walls.upgrade() {
+                                w.set_wallpaper(&set_path, keep);
+                            }
+                        }
+                    }));
                 }
-            }));
-            place(ui::button(s, Some("tune"), "Adjust", false, !item.live, {
-                let (walls, path) = (walls.clone(), path.clone());
-                move || {
+                place(ui::button(s, Some("palette"), "Tune palette", false, true, {
+                    let (walls, path) = (walls.clone(), path.clone());
+                    move || {
+                        if let Some(w) = walls.upgrade() {
+                            w.clear_side();
+                            tune::show(&w, &path);
+                        }
+                    }
+                }));
+                place(ui::button(s, Some("tune"), "Adjust", false, !item.live, {
+                    let (walls, path) = (walls.clone(), path.clone());
+                    move || {
+                        if let Some(w) = walls.upgrade() {
+                            w.clear_side();
+                            adjust::show(&w, &path);
+                        }
+                    }
+                }));
+                let armed = self.confirm_delete.get();
+                place(ui::button(s, Some("delete"), if armed { "Click again to delete" } else { "Delete" }, false, true, move || {
                     if let Some(w) = walls.upgrade() {
-                        w.clear_side();
-                        adjust::show(&w, &path);
+                        w.delete(&path);
                     }
-                }
-            }));
-            let armed = self.confirm_delete.get();
-            place(ui::button(s, Some("delete"), if armed { "Click again to delete" } else { "Delete" }, false, true, move || {
-                if let Some(w) = walls.upgrade() {
-                    w.delete(&path);
-                }
-            }));
+                }));
+            }
         }
         self.side.append(&actions);
     }
@@ -677,7 +691,7 @@ impl Walls {
                 Ok(path) => {
                     w.set_status(&format!("Saved {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
                     if then_set {
-                        w.set_wallpaper(&path);
+                        w.set_wallpaper(&path, true);
                     }
                 }
                 Err(why) => w.set_status(&why),
@@ -689,9 +703,17 @@ impl Walls {
         });
     }
 
-    fn set_wallpaper(&self, path: &std::path::Path) {
+    /// Sets `path` through the shell; `keep_colours` leaves the palette be.
+    fn set_wallpaper(self: &Rc<Self>, path: &std::path::Path, keep_colours: bool) {
         let shell = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("eclipse-shell"));
-        match std::process::Command::new(shell).arg("wallpaper-set").arg(path).spawn() {
+        let mut command = std::process::Command::new(shell);
+        command.arg("wallpaper-set");
+        if keep_colours {
+            command.arg("--keep-colours");
+        }
+        *self.current_wall.borrow_mut() = Some(path.to_owned());
+        self.show_side();
+        match command.arg(path).spawn() {
             Ok(mut child) => {
                 std::thread::spawn(move || {
                     let _ = child.wait();
@@ -719,7 +741,13 @@ impl Walls {
         match sources::trash(path) {
             Ok(()) => {
                 self.set_status("Moved to the trash");
-                self.search();
+                if self.source.get().remote() {
+                    // Still on the site; it's just not saved any more.
+                    self.redraw_grid();
+                    self.show_side();
+                } else {
+                    self.search();
+                }
             }
             Err(why) => self.set_status(&format!("Couldn't delete: {why}")),
         }
