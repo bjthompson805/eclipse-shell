@@ -35,6 +35,8 @@ pub const BAR_NET_SPEED: bool = true;
 pub const BAR_STATUS: bool = true;
 /// Show the current weather (from WEATHER_LOCATION).
 pub const BAR_WEATHER: bool = true;
+/// Show system tray icons.
+pub const BAR_TRAY: bool = true;
 
 /// Show only workspaces up to the highest occupied one (plus the active one).
 pub const OCCUPIED_WORKSPACES_ONLY: bool = true;

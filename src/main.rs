@@ -6,6 +6,7 @@ mod icons;
 mod launcher;
 mod mark;
 mod theme;
+mod tray;
 mod weather;
 
 use std::cell::{OnceCell, RefCell};
@@ -82,6 +83,7 @@ fn start(app: &gtk::Application) -> Option<Rc<Launcher>> {
     icons::use_desktop_theme();
     theme::watch_palette();
     weather::start();
+    tray::start();
 
     let launcher = Launcher::new(app);
     let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone() }));

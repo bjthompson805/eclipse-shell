@@ -12,6 +12,7 @@ mod net_speed;
 mod status;
 mod stats;
 mod title;
+mod tray;
 mod weather;
 mod workspaces;
 
@@ -161,7 +162,7 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 }
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
-/// network speed, the status cluster, weather and the power button on the right.
+/// network speed, the status cluster, weather, the tray and the power button on the right.
 fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>) -> gtk::CenterBox {
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
@@ -214,6 +215,12 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         // The pill only shows once there is a reading to put in it.
         reading.bind_property("visible", &weather.widget, "visible").sync_create().build();
         right.append(&weather.widget);
+    }
+    if config::BAR_TRAY {
+        let icons = tray::tray(s);
+        let tray = Module::new(&icons, ModuleSpec { interactive: false, ..pill(11.0 * s) });
+        icons.bind_property("visible", &tray.widget, "visible").sync_create().build();
+        right.append(&tray.widget);
     }
     right.append(&power.widget);
 
