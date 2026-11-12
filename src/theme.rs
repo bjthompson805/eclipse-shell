@@ -314,6 +314,20 @@ impl TextStyle {
     }
 }
 
+/// Font rendering for every surface: GTK's automatic mode slices a row
+/// off the top of some glyphs at fractional scales (a flat-topped "3" in
+/// the clock, a flickering cut through "49%"); manual rendering with slight
+/// hinting draws them whole. Call once the display is up.
+pub fn font_settings() {
+    let Some(settings) = gtk::Settings::default() else { return };
+    let manual = settings.find_property("gtk-font-rendering").and_then(|p| glib::EnumClass::with_type(p.value_type())).and_then(|c| c.to_value_by_nick("manual"));
+    if let Some(manual) = manual {
+        settings.set_property_from_value("gtk-font-rendering", &manual);
+    }
+    settings.set_gtk_xft_hintstyle(Some("hintslight"));
+    settings.set_property("gtk-hint-font-metrics", true);
+}
+
 /// A Material Symbols glyph, picked by ligature name.
 pub fn icon_glyph(name: &str, px: f64, color: Rgba) -> gtk::Label {
     glyph(name, px, color, "FILL=0,opsz=20")

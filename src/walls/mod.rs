@@ -48,6 +48,7 @@ pub fn run() -> glib::ExitCode {
         provider.load_from_string(crate::TRANSPARENT_WINDOW);
         gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         theme::watch_palette();
+        theme::font_settings();
         *shown.borrow_mut() = Some(Walls::new(app));
     });
     app.run_with_args::<&str>(&[])

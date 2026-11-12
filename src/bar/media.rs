@@ -160,6 +160,9 @@ fn draw_thumb(cr: &gtk::cairo::Context, w: f64, h: f64, art: Option<&ImageSurfac
         }
     }
 
+    // Showing the note's text leaves a current point; start the rim afresh
+    // so it isn't joined to it by a stray line.
+    cr.new_path();
     cr.arc(cx, cy, r - 0.5, 0.0, 2.0 * PI);
     cr.set_line_width(1.0);
     theme::set_source(cr, if playing { theme::palette().accent.alpha(0.8) } else { HAIR });

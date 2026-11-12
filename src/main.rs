@@ -249,6 +249,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
 
     icons::use_desktop_theme();
     theme::watch_palette();
+    theme::font_settings();
     weather::start();
     tray::start();
     notifications::start();
