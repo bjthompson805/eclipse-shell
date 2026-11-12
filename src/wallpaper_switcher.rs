@@ -201,7 +201,11 @@ impl WallpaperSwitcher {
         self.window.set_monitor(self.monitor.borrow().as_ref());
         let switcher = self.clone();
         glib::spawn_future_local(async move {
-            let current = wallpaper::current().await.map(PathBuf::from);
+            // What was set (a clip, not its poster), else what awww shows.
+            let current = match wallpaper::recorded() {
+                Some(p) => Some(p),
+                None => wallpaper::current().await.map(PathBuf::from),
+            };
             switcher.load_entries().await;
             if !switcher.open.get() {
                 return;
@@ -258,7 +262,7 @@ impl WallpaperSwitcher {
                 stale
                     .into_iter()
                     .map(|p| {
-                        let thumb = p.to_str().and_then(|s| wallpaper::decode_scaled(s, height));
+                        let thumb = wallpaper::still(&p).and_then(|still| still.to_str().and_then(|s| wallpaper::decode_scaled(s, height)));
                         let group = thumb.as_ref().and_then(|(d, _, _)| wallpaper::hue(d)).map_or(MONO, nearest_group);
                         let size = wallpaper::size(&p);
                         let t = std::fs::metadata(&p).and_then(|m| m.modified()).ok();
@@ -537,7 +541,10 @@ impl WallpaperSwitcher {
         let Some(entry) = self.hovered.get().or(Some(self.selected.get())).and_then(|i| filtered.get(i)).cloned() else { return };
         if let Some(view) = self.view.borrow().as_ref() {
             view.name.set_text(&entry.name);
-            let ext = entry.path.extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
+            let mut ext = entry.path.extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
+            if wallpaper::is_video(&entry.path) {
+                ext = format!("LIVE {ext}");
+            }
             let group = if entry.group == MONO { "MONO" } else { GROUPS[entry.group].0 };
             view.detail.set_text(&match entry.size {
                 Some((w, h)) => format!("{w} × {h} · {ext} · {}", group.to_uppercase()),
@@ -563,7 +570,7 @@ impl WallpaperSwitcher {
             let switcher = Rc::downgrade(self);
             glib::spawn_future_local(async move {
                 let p = path.clone();
-                let decoded = gio::spawn_blocking(move || p.to_str().and_then(|s| wallpaper::decode_scaled(s, height))).await.ok().flatten();
+                let decoded = gio::spawn_blocking(move || wallpaper::still(&p).and_then(|still| still.to_str().and_then(|s| wallpaper::decode_scaled(s, height)))).await.ok().flatten();
                 let (Some(sw), Some((d, w, h))) = (switcher.upgrade(), decoded) else { return };
                 if !sw.open.get() {
                     return;
@@ -732,6 +739,9 @@ fn draw_tile(cr: &cairo::Context, w: f64, h: f64, s: f64, entry: &Entry, selecte
     let _ = cr.stroke();
 
     // On screen now: a dot in the uncut top-right corner.
+    if wallpaper::is_video(&entry.path) {
+        live_tag(cr, x + tw - 8.0 * s, y + th - 8.0 * s, s);
+    }
     if current {
         let (cx, cy, r) = (x + tw - 9.0 * s, y + 9.0 * s, 3.5 * s);
         cr.arc(cx, cy, r + 1.5 * s, 0.0, 2.0 * PI);
@@ -741,6 +751,25 @@ fn draw_tile(cr: &cairo::Context, w: f64, h: f64, s: f64, entry: &Entry, selecte
         theme::set_source(cr, palette.accent_lit);
         let _ = cr.fill();
     }
+}
+
+/// A small "LIVE" tag with its bottom-right corner at (right, bottom).
+fn live_tag(cr: &cairo::Context, right: f64, bottom: f64, s: f64) {
+    let layout = pangocairo::functions::create_layout(cr);
+    layout.set_text("LIVE");
+    layout.set_attributes(Some(&TextStyle::new(7.5 * s, pango::Weight::Bold, CREAM).mono().tracking(1.0 * s).attrs()));
+    let (_, logical) = layout.pixel_extents();
+    let (pad_x, pad_y) = (4.0 * s, 1.5 * s);
+    let (w, h) = (f64::from(logical.width()) + 2.0 * pad_x, f64::from(logical.height()) + 2.0 * pad_y);
+    theme::rounded_rect(cr, right - w, bottom - h, w, h, 3.0 * s);
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.6);
+    let _ = cr.fill_preserve();
+    cr.set_line_width(1.0);
+    theme::set_source(cr, theme::palette().accent.alpha(0.8));
+    let _ = cr.stroke();
+    theme::set_source(cr, CREAM);
+    cr.move_to(right - w + pad_x, bottom - h + pad_y);
+    pangocairo::functions::show_layout(cr, &layout);
 }
 
 /// "ON SCREEN" with a dot, for the preview caption.

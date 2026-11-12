@@ -18,6 +18,7 @@ mod hyprland;
 mod icons;
 mod inbox_popout;
 mod launcher;
+mod livewall;
 mod mark;
 mod media;
 mod media_popout;
@@ -256,6 +257,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     capture::start();
     traffic::start();
     hyprland::keep(display_popout::restore);
+    wallpaper::resume();
     bluetooth::start();
 
     let launcher = Launcher::new(app);
@@ -308,6 +310,22 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
 /// `eclipse-shell toggle-launcher` from a keybinding, are forwarded to it over
 /// D-Bus by GApplication and exit straight away.
 fn main() -> glib::ExitCode {
+    // The live wallpaper runs as a process of its own, without GTK.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("livewall") {
+        let Some(clip) = args.get(2) else {
+            eprintln!("usage: eclipse-shell livewall <clip>");
+            return glib::ExitCode::FAILURE;
+        };
+        return match livewall::run(std::path::Path::new(clip)) {
+            Ok(()) => glib::ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("eclipse-shell livewall: {err}");
+                glib::ExitCode::FAILURE
+            }
+        };
+    }
+
     let app = gtk::Application::builder()
         .application_id("io.github.bjthompson805.EclipseShell")
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
@@ -492,6 +510,13 @@ fn main() -> glib::ExitCode {
                 }
             }
             Some("wallpaper-next") => wallpaper::next(),
+            Some("wallpaper-set") => match args.get(2) {
+                Some(path) => wallpaper::set(&command_line.create_file_for_arg(path).path().unwrap_or_else(|| path.into())),
+                None => {
+                    command_line.printerr_literal("usage: eclipse-shell wallpaper-set <file>\n");
+                    return glib::ExitCode::FAILURE;
+                }
+            },
             Some("toggle-power") => {
                 if let Some(surfaces) = surfaces.get() {
                     surfaces.power.toggle();
