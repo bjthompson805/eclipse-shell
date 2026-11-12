@@ -29,6 +29,8 @@ pub const CLOCK_SECONDS: bool = true;
 pub const BAR_STATS: bool = true;
 /// Show Claude Code's five-hour rate-limit usage.
 pub const BAR_AGENT_USAGE: bool = true;
+/// Show download and upload speed.
+pub const BAR_NET_SPEED: bool = true;
 
 /// Show only workspaces up to the highest occupied one (plus the active one).
 pub const OCCUPIED_WORKSPACES_ONLY: bool = true;

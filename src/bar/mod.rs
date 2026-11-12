@@ -8,6 +8,7 @@
 mod agent_usage;
 mod clock;
 mod module;
+mod net_speed;
 mod stats;
 mod title;
 mod workspaces;
@@ -158,7 +159,7 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 }
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
-/// the power button on the right.
+/// network speed and the power button on the right.
 fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>) -> gtk::CenterBox {
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
@@ -197,6 +198,10 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     let power = Module::new(&power_icon, pill(10.0 * s));
 
     let right = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_end(edge_margin).build();
+    if config::BAR_NET_SPEED {
+        let speed = Module::new(&net_speed::net_speed(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
+        right.append(&speed.widget);
+    }
     right.append(&power.widget);
 
     let content = gtk::CenterBox::builder().valign(gtk::Align::Start).build();
