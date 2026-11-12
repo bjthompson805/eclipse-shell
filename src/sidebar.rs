@@ -150,6 +150,14 @@ impl Sidebar {
             }
         });
         sidebar.window.add_controller(keys);
+        sidebar.window.connect_map({
+            let sidebar = Rc::downgrade(&sidebar);
+            move |_| {
+                if let Some(s) = sidebar.upgrade().filter(|s| s.open.get()) {
+                    s.animate(1.0);
+                }
+            }
+        });
         sidebar
     }
 
@@ -295,8 +303,15 @@ impl Sidebar {
         if let Some(f) = self.on_open.borrow().as_ref() {
             f(true, s);
         }
-        self.window.present();
-        self.animate(1.0);
+        // The slide starts once the panel is on screen (see the map
+        // handler): the first map takes long enough that a slide started
+        // here would be over before the first frame.
+        self.place(0.0);
+        if self.window.is_mapped() {
+            self.animate(1.0);
+        } else {
+            self.window.present();
+        }
     }
 
     pub fn hide(self: &Rc<Self>) {

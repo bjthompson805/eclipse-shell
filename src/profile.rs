@@ -53,6 +53,18 @@ impl Profile {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
         let sidebar = Sidebar::new(app, Side::Left, "eclipse-shell-profile", 340.0);
         let profile = Rc::new(Self { sidebar, facts: RefCell::default(), updaters: RefCell::default(), open: Cell::new(false) });
+        // Gathered now, so the first open has them to show as it slides in.
+        glib::spawn_future_local({
+            let profile = Rc::downgrade(&profile);
+            async move {
+                let facts = gio::spawn_blocking(gather).await.unwrap_or_default();
+                if let Some(p) = profile.upgrade() {
+                    if p.facts.borrow().is_none() {
+                        *p.facts.borrow_mut() = Some(facts);
+                    }
+                }
+            }
+        });
         profile.sidebar.connect_open({
             let profile = Rc::downgrade(&profile);
             move |open, s| {
