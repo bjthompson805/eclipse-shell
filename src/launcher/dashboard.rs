@@ -1,7 +1,8 @@
 //! The launcher's resting card, shown while the query is empty: a greeting and
 //! large clock on the left, the weather on the right, and a drifting horizon
 //! along the bottom whose lit stretch shows how far through the day (or night)
-//! it is, with the sun or moon riding it.
+//! it is, with the sun or moon riding it. Behind it all, dimmed, an eclipse:
+//! a dark disc in a slowly turning corona over a few faint stars.
 
 use std::f64::consts::PI;
 use std::rc::Rc;
@@ -185,6 +186,7 @@ fn draw(cr: &cairo::Context, w: f64, h: f64, s: f64) {
     theme::set_source(cr, SHEEN);
     let _ = cr.fill();
 
+    draw_eclipse(cr, w, h, s);
     draw_horizon(cr, w, h, s);
     let _ = cr.restore();
 
@@ -192,6 +194,97 @@ fn draw(cr: &cairo::Context, w: f64, h: f64, s: f64) {
     cr.set_line_width(1.0);
     theme::set_source(cr, palette.outline);
     let _ = cr.stroke();
+}
+
+/// How strongly the eclipse shows; it's atmosphere behind the text.
+const ECLIPSE_STRENGTH: f64 = 0.6;
+/// One turn of the corona, in seconds.
+const CORONA_TURN_S: f64 = 240.0;
+
+/// A small fixed hash of `i` into 0..1, for star places and streamer lengths
+/// that stay put from frame to frame.
+fn scatter(i: u32, salt: u32) -> f64 {
+    let mut x = i.wrapping_mul(0x9e37_79b9) ^ salt.wrapping_mul(0x85eb_ca6b);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2c1b_3c6d);
+    x ^= x >> 12;
+    f64::from(x % 10_000) / 10_000.0
+}
+
+/// The backdrop: stars, then the corona and its streamers, the dark disc,
+/// a lit rim and a bead of light where the sun breaks through.
+fn draw_eclipse(cr: &cairo::Context, w: f64, h: f64, s: f64) {
+    let palette = theme::palette();
+    let seconds = glib::monotonic_time() as f64 / 1_000_000.0;
+    let (cx, cy) = (w * 0.56, h * 0.42);
+    let r = 21.0 * s;
+    let (glow, edge) = (palette.accent_lit, palette.edge);
+
+    cr.push_group();
+
+    // Stars, twinkling a little, kept clear of the corona.
+    for i in 0..34 {
+        let (x, y) = (scatter(i, 1) * w, scatter(i, 2) * h * 0.78);
+        if ((x - cx).powi(2) + (y - cy).powi(2)).sqrt() < r * 2.6 {
+            continue;
+        }
+        let twinkle = 0.55 + 0.45 * (seconds * (0.6 + scatter(i, 3)) + scatter(i, 4) * 6.0).sin();
+        cr.arc(x, y, (0.5 + scatter(i, 5) * 0.8) * s, 0.0, 2.0 * PI);
+        theme::set_source(cr, CREAM.alpha(0.35 * twinkle));
+        let _ = cr.fill();
+    }
+
+    // The corona's soft body.
+    let body = cairo::RadialGradient::new(cx, cy, r * 0.9, cx, cy, r * 3.4);
+    body.add_color_stop_rgba(0.0, glow.r, glow.g, glow.b, 0.55);
+    body.add_color_stop_rgba(0.35, edge.r, edge.g, edge.b, 0.18);
+    body.add_color_stop_rgba(1.0, edge.r, edge.g, edge.b, 0.0);
+    cr.arc(cx, cy, r * 3.4, 0.0, 2.0 * PI);
+    let _ = cr.set_source(&body);
+    let _ = cr.fill();
+
+    // Streamers: tapered petals of fixed lengths, turning slowly.
+    let turn = seconds / CORONA_TURN_S * 2.0 * PI;
+    for i in 0..14 {
+        let angle = f64::from(i) / 14.0 * 2.0 * PI + scatter(i, 6) * 0.35 + turn;
+        let reach = r * (1.5 + scatter(i, 7) * 1.7);
+        let spread = 0.07 + scatter(i, 8) * 0.07;
+        let at = |a: f64, d: f64| (cx + a.cos() * d, cy + a.sin() * d);
+        let (bx0, by0) = at(angle - spread, r * 0.95);
+        let (bx1, by1) = at(angle + spread, r * 0.95);
+        let (tx, ty) = at(angle, reach);
+        let (c0x, c0y) = at(angle - spread * 0.4, reach * 0.62);
+        let (c1x, c1y) = at(angle + spread * 0.4, reach * 0.62);
+        cr.move_to(bx0, by0);
+        cr.curve_to(c0x, c0y, c0x, c0y, tx, ty);
+        cr.curve_to(c1x, c1y, c1x, c1y, bx1, by1);
+        cr.close_path();
+        let fade = cairo::RadialGradient::new(cx, cy, r, cx, cy, reach);
+        fade.add_color_stop_rgba(0.0, glow.r, glow.g, glow.b, 0.32);
+        fade.add_color_stop_rgba(1.0, glow.r, glow.g, glow.b, 0.0);
+        let _ = cr.set_source(&fade);
+        let _ = cr.fill();
+    }
+
+    // The disc, its lit rim, and the bead up and to the right, as on the mark.
+    cr.arc(cx, cy, r, 0.0, 2.0 * PI);
+    theme::set_source(cr, palette.recessed);
+    let _ = cr.fill_preserve();
+    cr.set_line_width(1.2 * s);
+    theme::set_source(cr, glow.alpha(0.85));
+    let _ = cr.stroke();
+    let bead = -PI / 4.0;
+    let (bx, by) = (cx + bead.cos() * r, cy + bead.sin() * r);
+    let shine = cairo::RadialGradient::new(bx, by, 0.0, bx, by, 9.0 * s);
+    shine.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.95);
+    shine.add_color_stop_rgba(0.25, glow.r, glow.g, glow.b, 0.7);
+    shine.add_color_stop_rgba(1.0, glow.r, glow.g, glow.b, 0.0);
+    cr.arc(bx, by, 9.0 * s, 0.0, 2.0 * PI);
+    let _ = cr.set_source(&shine);
+    let _ = cr.fill();
+
+    let _ = cr.pop_group_to_source();
+    let _ = cr.paint_with_alpha(ECLIPSE_STRENGTH);
 }
 
 fn gradient(top: f64, bottom: f64, colour: Rgba, stops: &[(f64, f64)]) -> cairo::LinearGradient {
