@@ -37,6 +37,8 @@ pub const BAR_STATUS: bool = true;
 pub const BAR_WEATHER: bool = true;
 /// Show system tray icons.
 pub const BAR_TRAY: bool = true;
+/// Show the playing track.
+pub const BAR_MEDIA: bool = true;
 
 /// Show only workspaces up to the highest occupied one (plus the active one).
 pub const OCCUPIED_WORKSPACES_ONLY: bool = true;

@@ -160,9 +160,7 @@ pub fn status(s: f64) -> gtk::Box {
     on_scroll(&volume, {
         let refresh = refresh.clone();
         move |up| {
-            let step = if up { "3%+" } else { "3%-" };
-            spawn(&["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"]);
-            spawn(&["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", step]);
+            nudge_volume(up);
             let _ = refresh.try_send(());
         }
     });
@@ -171,6 +169,12 @@ pub fn status(s: f64) -> gtk::Box {
         let _ = refresh.try_send(());
     });
     row
+}
+
+/// Unmutes and steps the default output's volume by 3%, up to 100%.
+pub fn nudge_volume(up: bool) {
+    spawn(&["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"]);
+    spawn(&["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", if up { "3%+" } else { "3%-" }]);
 }
 
 fn set_glyph(label: &gtk::Label, name: &str, px: f64, color: Rgba) {

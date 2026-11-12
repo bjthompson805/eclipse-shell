@@ -7,6 +7,7 @@
 
 mod agent_usage;
 mod clock;
+mod media;
 mod module;
 mod net_speed;
 mod status;
@@ -162,8 +163,8 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 }
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
-/// network speed, the status cluster, weather, the tray and the power button on the right.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>) -> gtk::CenterBox {
+/// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>) -> gtk::Overlay {
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
     let pill = |pad_x: f64| ModuleSpec { span, pad_x, filled: true, interactive: true, square: false };
@@ -201,6 +202,21 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     let power = Module::new(&power_icon, pill(10.0 * s));
 
     let right = gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).margin_end(edge_margin).build();
+    if config::BAR_MEDIA {
+        let playing = media::media(s);
+        let media = Module::new(&playing, pill(12.0 * s));
+        media.connect_tapped(media::toggle);
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        scroll.connect_scroll(|_, _, dy| {
+            if dy != 0.0 {
+                status::nudge_volume(dy < 0.0);
+            }
+            gtk::glib::Propagation::Stop
+        });
+        media.widget.add_controller(scroll);
+        playing.bind_property("visible", &media.widget, "visible").sync_create().build();
+        right.append(&media.widget);
+    }
     if config::BAR_NET_SPEED {
         let speed = Module::new(&net_speed::net_speed(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
         right.append(&speed.widget);
@@ -224,9 +240,24 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     }
     right.append(&power.widget);
 
-    let content = gtk::CenterBox::builder().valign(gtk::Align::Start).build();
-    content.set_start_widget(Some(&left));
-    content.set_center_widget(Some(&clock.widget));
-    content.set_end_widget(Some(&right));
+    // The sides sit at the edges; the clock floats above them at the centre,
+    // sliding sideways only as far as keeps a gap from a crowded side.
+    let sides = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    left.set_hexpand(true);
+    left.set_halign(gtk::Align::Start);
+    sides.append(&left);
+    sides.append(&right);
+    let content = gtk::Overlay::builder().valign(gtk::Align::Start).child(&sides).build();
+    content.add_overlay(&clock.widget);
+    let gap = (12.0 * s).round() as i32;
+    content.connect_get_child_position(move |content, clock| {
+        let natural = |w: &gtk::Widget| w.measure(gtk::Orientation::Horizontal, -1).1;
+        let (width, height) = (content.width(), content.height());
+        let cw = natural(clock);
+        let lowest = natural(left.upcast_ref()) + gap;
+        let highest = width - natural(right.upcast_ref()) - gap - cw;
+        let x = (width / 2 - cw / 2).min(highest).max(lowest);
+        Some(gdk::Rectangle::new(x, 0, cw, height))
+    });
     content
 }

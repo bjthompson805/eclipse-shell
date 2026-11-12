@@ -5,6 +5,7 @@ mod hyprland;
 mod icons;
 mod launcher;
 mod mark;
+mod media;
 mod theme;
 mod tray;
 mod weather;
@@ -84,6 +85,7 @@ fn start(app: &gtk::Application) -> Option<Rc<Launcher>> {
     theme::watch_palette();
     weather::start();
     tray::start();
+    media::start();
 
     let launcher = Launcher::new(app);
     let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone() }));
