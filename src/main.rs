@@ -22,6 +22,7 @@ mod media;
 mod media_popout;
 mod network_popout;
 mod notifications;
+mod osd;
 mod mixer_popout;
 mod overview;
 mod popout;
@@ -60,6 +61,7 @@ use launcher::Launcher;
 use media_popout::MediaPopout;
 use mixer_popout::MixerPopout;
 use network_popout::NetworkPopout;
+use osd::Osd;
 use overview::Overview;
 use power::Power;
 use resources_popout::ResourcesPopout;
@@ -93,6 +95,7 @@ struct Shell {
     toasts: Rc<Toasts>,
     inbox: Rc<InboxPopout>,
     clipboard: Rc<ClipboardPopout>,
+    osd: Rc<Osd>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -126,6 +129,7 @@ impl Shell {
         self.toasts.set_monitor(focused.clone());
         self.inbox.set_monitor(focused.clone());
         self.clipboard.set_monitor(focused.clone());
+        self.osd.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -199,6 +203,7 @@ struct Surfaces {
     overview: Rc<Overview>,
     inbox: Rc<InboxPopout>,
     clipboard: Rc<ClipboardPopout>,
+    osd: Rc<Osd>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -248,10 +253,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let toasts = Toasts::new(app);
     let inbox = InboxPopout::new(app);
     let clipboard = ClipboardPopout::new(app);
+    let osd = Osd::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), osd: osd.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -271,7 +277,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, osd, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -404,6 +410,11 @@ fn main() -> glib::ExitCode {
             Some("toggle-clipboard") => {
                 if let Some(surfaces) = surfaces.get() {
                     surfaces.clipboard.toggle();
+                }
+            }
+            Some("lock-keys") => {
+                if let Some(surfaces) = surfaces.get() {
+                    surfaces.osd.lock_key(args.get(2).and_then(|a| a.to_str()) != Some("num"));
                 }
             }
             Some("toggle-battery") => {
