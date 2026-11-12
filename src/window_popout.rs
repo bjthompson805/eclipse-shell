@@ -15,7 +15,7 @@ use gtk4 as gtk;
 use serde::Deserialize;
 
 use crate::popout::{self, Anchor, Popout};
-use crate::theme::{self, TextStyle, CREAM, DIM, HAIR, SUBTLE};
+use crate::theme::{self, TextStyle, CREAM, DIM, SUBTLE};
 use crate::{hyprland, icons};
 
 const NAMESPACE: &str = "eclipse-shell-window";
@@ -157,7 +157,7 @@ fn body(s: f64, window: Option<&Active>, monitor: &str, process: &Process) -> gt
     heading.append(&title);
     column.append(&heading);
 
-    column.append(&divider());
+    column.append(&popout::divider());
     let state = format!("{}{}", if w.floating { "Floating" } else { "Tiled" }, if w.fullscreen > 0 { " \u{b7} Fullscreen" } else { "" });
     let size = if w.size[0] > 0 { format!("{} \u{d7} {}", w.size[0], w.size[1]) } else { String::new() };
     let workspace = w.workspace.as_ref().map(|ws| ws.name.clone()).unwrap_or_default();
@@ -176,7 +176,7 @@ fn body(s: f64, window: Option<&Active>, monitor: &str, process: &Process) -> gt
     }
     column.append(&rows);
 
-    column.append(&divider());
+    column.append(&popout::divider());
     let header = TextStyle::new(9.0 * s, pango::Weight::Semibold, SUBTLE).tracking(1.4 * s).label("PROCESS");
     header.set_xalign(0.0);
     column.append(&header);
@@ -221,15 +221,6 @@ fn info_row(s: f64, label: &str, value: &str) -> gtk::Box {
     row
 }
 
-fn divider() -> gtk::DrawingArea {
-    let line = gtk::DrawingArea::builder().content_height(1).build();
-    line.set_draw_func(|_, cr, w, h| {
-        theme::set_source(cr, HAIR);
-        cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
-        let _ = cr.fill();
-    });
-    line
-}
 
 /// CPU share, resident memory and command line of `pid`.
 async fn sample(pid: i32) -> Process {

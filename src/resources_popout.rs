@@ -131,7 +131,7 @@ fn body(s: f64, stats: &Stats) -> gtk::Box {
     }
 
     if !stats.processes.is_empty() {
-        column.append(&divider());
+        column.append(&popout::divider());
         let header = TextStyle::new(9.0 * s, pango::Weight::Semibold, SUBTLE).tracking(1.4 * s).label("TOP PROCESSES");
         header.set_xalign(0.0);
         column.append(&header);
@@ -238,12 +238,3 @@ fn bar(s: f64, height: f64, fraction: f64, fill: Rgba) -> gtk::DrawingArea {
     area
 }
 
-fn divider() -> gtk::DrawingArea {
-    let line = gtk::DrawingArea::builder().content_height(1).build();
-    line.set_draw_func(|_, cr, w, h| {
-        theme::set_source(cr, HAIR);
-        cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
-        let _ = cr.fill();
-    });
-    line
-}

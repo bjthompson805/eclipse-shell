@@ -9,6 +9,7 @@ mod icons;
 mod launcher;
 mod mark;
 mod media;
+mod mixer_popout;
 mod popout;
 mod power;
 mod resources_popout;
@@ -31,6 +32,7 @@ use battery_popout::BatteryPopout;
 use calendar::Calendar;
 use hyprland::State;
 use launcher::Launcher;
+use mixer_popout::MixerPopout;
 use power::Power;
 use resources_popout::ResourcesPopout;
 use usage_popout::UsagePopout;
@@ -47,6 +49,7 @@ struct Shell {
     power: Rc<Power>,
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
+    mixer: Rc<MixerPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -68,6 +71,7 @@ impl Shell {
         self.power.set_monitor(focused.clone());
         self.calendar.set_monitor(focused.clone());
         self.usage.set_monitor(focused.clone());
+        self.mixer.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -93,12 +97,13 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         bar.destroy();
     }
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
-    let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
+    let (mixer, battery, window, resources) = (shell_ref.mixer.clone(), shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
         power: Rc::new(move || power.toggle()),
         calendar: Rc::new(move |x| calendar.toggle(x)),
         usage: Rc::new(move |x| usage.toggle(x)),
+        mixer: Rc::new(move |x| mixer.toggle(x)),
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
         resources: Rc::new(move |x| resources.toggle(x)),
@@ -117,6 +122,7 @@ struct Surfaces {
     power: Rc<Power>,
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
+    mixer: Rc<MixerPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -148,10 +154,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let power = Power::new(app);
     let calendar = Calendar::new(app);
     let usage = UsagePopout::new(app);
+    let mixer = MixerPopout::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -171,7 +178,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -221,6 +228,14 @@ fn main() -> glib::ExitCode {
                     let bar = shell.focused_bar();
                     if let Some(x) = bar.and_then(Bar::usage_x) {
                         surfaces.usage.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-mixer") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    if let Some(x) = shell.focused_bar().and_then(Bar::volume_x) {
+                        surfaces.mixer.toggle(x);
                     }
                 }
             }

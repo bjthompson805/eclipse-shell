@@ -1,6 +1,6 @@
 //! Status cluster: volume, display brightness, network, Bluetooth and
 //! battery, as a row of glyphs. Scrolling the volume or brightness glyph
-//! nudges it.
+//! nudges it; clicking the volume glyph opens the mixer.
 //!
 //! One small shell script gathers every reading every two seconds (wpctl,
 //! backlight, ifconfig, hccontrol, sysctl), and again right after a scroll.
@@ -66,8 +66,8 @@ impl Battery {
     }
 }
 
-/// `on_battery` opens the battery popout under the given x.
-pub fn status(s: f64, on_battery: Rc<dyn Fn(f64)>) -> gtk::Box {
+/// `on_volume` and `on_battery` open the mixer and battery popouts under the given x.
+pub fn status(s: f64, on_volume: Rc<dyn Fn(f64)>, on_battery: Rc<dyn Fn(f64)>) -> gtk::Box {
     let glyph_px = 14.0 * s;
     let slot = (glyph_px + 4.0 * s).round() as i32;
     let row = gtk::Box::new(gtk::Orientation::Horizontal, (9.0 * s).round() as i32);
@@ -88,14 +88,8 @@ pub fn status(s: f64, on_battery: Rc<dyn Fn(f64)>) -> gtk::Box {
     battery_row.append(&battery);
     battery_row.append(&battery_pct);
     row.append(&battery_row);
-    battery_row.set_cursor_from_name(Some("pointer"));
-    let click = gtk::GestureClick::new();
-    click.connect_released(move |gesture, _, _, _| {
-        if let Some(x) = gesture.widget().and_then(|w| super::centre_x(&w)) {
-            on_battery(x);
-        }
-    });
-    battery_row.add_controller(click);
+    on_click(&volume, on_volume);
+    on_click(&battery_row, on_battery);
 
     let reading = Rc::new(RefCell::new(Reading::default()));
     sun.set_draw_func({
@@ -242,6 +236,18 @@ fn draw_sun(cr: &gtk::cairo::Context, w: f64, h: f64, size: f64, bright: bool) {
         cr.line_to(cx + outer * a.cos(), cy + outer * a.sin());
     }
     let _ = cr.stroke();
+}
+
+/// Opens a popout under `widget` when it's clicked.
+fn on_click(widget: &impl IsA<gtk::Widget>, open: Rc<dyn Fn(f64)>) {
+    widget.set_cursor_from_name(Some("pointer"));
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |gesture, _, _, _| {
+        if let Some(x) = gesture.widget().and_then(|w| super::centre_x(&w)) {
+            open(x);
+        }
+    });
+    widget.add_controller(click);
 }
 
 fn on_scroll(widget: &impl IsA<gtk::Widget>, f: impl Fn(bool) + 'static) {

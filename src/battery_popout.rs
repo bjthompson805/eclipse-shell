@@ -16,7 +16,7 @@ use gtk::{cairo, gdk, gio, glib, pango};
 use gtk4 as gtk;
 
 use crate::popout::{self, Anchor, Popout};
-use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, FAINT, FLAME, HAIR, ICON_DIM, SUBTLE};
+use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, FAINT, FLAME, ICON_DIM, SUBTLE};
 
 const NAMESPACE: &str = "eclipse-shell-battery";
 const HELPER: &str = "/usr/local/libexec/eclipse-priv";
@@ -234,13 +234,13 @@ impl BatteryPopout {
         column.append(&meter(s, f64::from(r.percent) / 100.0, r.tint()));
 
         if let Some(limit) = r.limit {
-            column.append(&divider());
+            column.append(&popout::divider());
             column.append(&self.limit_section(s, limit, r.can_change));
         }
 
-        column.append(&divider());
+        column.append(&popout::divider());
         let profile = gtk::Box::new(gtk::Orientation::Vertical, px(7.0));
-        profile.append(&micro_label(s, "Profile"));
+        profile.append(&popout::micro_label(s, "Profile"));
         let tabs = gtk::Box::builder().spacing(px(3.0)).homogeneous(true).build();
         for option in Profile::ALL {
             let battery = Rc::downgrade(self);
@@ -265,7 +265,7 @@ impl BatteryPopout {
             rows.push(("Health", format!("{health}%")));
         }
         if !rows.is_empty() {
-            column.append(&divider());
+            column.append(&popout::divider());
             let details = gtk::Box::new(gtk::Orientation::Vertical, px(8.0));
             for (label, value) in rows {
                 details.append(&info_row(s, label, &value));
@@ -293,7 +293,7 @@ impl BatteryPopout {
         };
 
         let head = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        let label = micro_label(s, "Charge limit");
+        let label = popout::micro_label(s, "Charge limit");
         label.set_hexpand(true);
         head.append(&label);
         head.append(&switch(s, limit.enabled, can_change, {
@@ -396,15 +396,10 @@ async fn output(argv: &[&str]) -> Option<String> {
 
 // ---- pieces ------------------------------------------------------------------
 
-fn micro_label(s: f64, text: &str) -> gtk::Label {
-    let label = TextStyle::new(9.0 * s, pango::Weight::Semibold, SUBTLE).mono().tracking(1.2 * s).label(&text.to_uppercase());
-    label.set_xalign(0.0);
-    label
-}
 
 fn info_row(s: f64, label: &str, value: &str) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    let name = micro_label(s, label);
+    let name = popout::micro_label(s, label);
     name.set_hexpand(true);
     name.set_valign(gtk::Align::Baseline);
     row.append(&name);
@@ -414,15 +409,6 @@ fn info_row(s: f64, label: &str, value: &str) -> gtk::Box {
     row
 }
 
-fn divider() -> gtk::DrawingArea {
-    let line = gtk::DrawingArea::builder().content_height(1).build();
-    line.set_draw_func(|_, cr, w, h| {
-        theme::set_source(cr, HAIR);
-        cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
-        let _ = cr.fill();
-    });
-    line
-}
 
 fn meter(s: f64, fraction: f64, fill: Rgba) -> gtk::DrawingArea {
     let bar = gtk::DrawingArea::builder().content_height((6.0 * s).round() as i32).hexpand(true).build();

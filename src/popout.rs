@@ -195,3 +195,21 @@ pub fn card(content: &impl IsA<gtk::Widget>) -> gtk::Overlay {
     card.set_measure_overlay(content, true);
     card
 }
+
+/// A small spaced-out caps label heading a section of a card.
+pub fn micro_label(s: f64, text: &str) -> gtk::Label {
+    let label = TextStyle::new(9.0 * s, gtk::pango::Weight::Semibold, theme::SUBTLE).mono().tracking(1.2 * s).label(&text.to_uppercase());
+    label.set_xalign(0.0);
+    label
+}
+
+/// A hairline between sections of a card.
+pub fn divider() -> gtk::DrawingArea {
+    let line = gtk::DrawingArea::builder().content_height(1).build();
+    line.set_draw_func(|_, cr, w, h| {
+        theme::set_source(cr, theme::HAIR);
+        cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
+        let _ = cr.fill();
+    });
+    line
+}

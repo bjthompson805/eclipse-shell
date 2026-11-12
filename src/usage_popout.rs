@@ -13,7 +13,7 @@ use gtk4 as gtk;
 
 use crate::agent_usage::{self, format_tokens, Limit, Usage};
 use crate::popout::{self, Anchor, Popout};
-use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, DIM, HAIR, SUBTLE};
+use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, DIM, SUBTLE};
 
 const NAMESPACE: &str = "eclipse-shell-usage";
 const WARN_ABOVE: u32 = 80;
@@ -116,7 +116,7 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
     }
 
     if !usage.days.is_empty() {
-        column.append(&divider());
+        column.append(&popout::divider());
         let days = section(s, "Tokens by day", 8.0);
         let peak = usage.days.iter().map(|(_, t)| *t).max().unwrap_or(1).max(1);
         let today = glib::DateTime::now_local().ok().and_then(|d| d.format("%Y-%m-%d").ok()).map(String::from).unwrap_or_default();
@@ -127,7 +127,7 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
     }
 
     if !usage.models.is_empty() {
-        column.append(&divider());
+        column.append(&popout::divider());
         let models = section(s, "Tokens by model", 6.0);
         let top = usage.models[0].1.max(1);
         for (name, tokens) in &usage.models {
@@ -151,15 +151,6 @@ fn section(s: f64, title: &str, spacing: f64) -> gtk::Box {
     group
 }
 
-fn divider() -> gtk::DrawingArea {
-    let line = gtk::DrawingArea::builder().content_height(1).build();
-    line.set_draw_func(|_, cr, w, h| {
-        theme::set_source(cr, HAIR);
-        cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
-        let _ = cr.fill();
-    });
-    line
-}
 
 /// A thin rounded track filled to `fraction`.
 fn meter(s: f64, fraction: f64, fill: Rgba) -> gtk::DrawingArea {
