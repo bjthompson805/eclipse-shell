@@ -91,6 +91,11 @@ thread_local! {
     static PLAYERS: RefCell<Vec<Player>> = RefCell::default();
     static LISTENERS: RefCell<Vec<Box<dyn Fn()>>> = RefCell::default();
     static SUBSCRIPTIONS: RefCell<Vec<(String, gio::SignalSubscription)>> = RefCell::default();
+    /// The length each track last reported, and the tracks found to be live:
+    /// a stream (mpv playing a radio, say) can report what it has buffered as
+    /// its length, which grows as it plays.
+    static LENGTHS: RefCell<std::collections::HashMap<String, i64>> = RefCell::default();
+    static LIVE: RefCell<std::collections::HashSet<String>> = RefCell::default();
 }
 
 /// Every player with a track, live wallpapers left out.
@@ -255,6 +260,18 @@ fn refresh(name: &str) {
             .and_then(|m| m.lookup_value("mpris:trackid", None))
             .and_then(|v| v.str().map(String::from))
             .unwrap_or_default();
+        // A length that changes while the track stays the same is a live stream's.
+        let track_key = format!("{name}\u{1f}{track_id}\u{1f}{}", text("xesam:title"));
+        let live = match length {
+            Some(raw) => {
+                let before = LENGTHS.with(|l| l.borrow_mut().insert(track_key.clone(), raw));
+                if before.is_some_and(|b| b != raw) {
+                    LIVE.with(|l| l.borrow_mut().insert(track_key.clone()));
+                }
+                LIVE.with(|l| l.borrow().contains(&track_key))
+            }
+            None => false,
+        };
         let fresh = Player {
             name: name.clone(),
             playing: status == "Playing",
@@ -262,11 +279,11 @@ fn refresh(name: &str) {
             artists,
             album: text("xesam:album"),
             art_url: text("mpris:artUrl"),
-            length: length.filter(|l| *l > 0).map(|l| Duration::from_micros(l as u64)),
+            length: length.filter(|l| *l > 0 && !live).map(|l| Duration::from_micros(l as u64)),
             track_id,
             can_previous: flag("CanGoPrevious"),
             can_next: flag("CanGoNext"),
-            can_seek: flag("CanSeek"),
+            can_seek: flag("CanSeek") && !live,
             shuffle: props.lookup::<bool>("Shuffle").ok().flatten(),
             repeat: props.lookup::<String>("LoopStatus").ok().flatten().and_then(|l| Repeat::parse(&l)),
             ..Player::default()

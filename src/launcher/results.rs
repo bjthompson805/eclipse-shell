@@ -1,6 +1,7 @@
-//! Ranked app results: a section header over up to eight visible rows. The
-//! keyboard selection and the pointer hover are tracked separately, so moving
-//! the mouse never changes what Enter launches.
+//! The result rows under the search row: a section header over up to eight
+//! visible rows of whatever the providers found (apps, windows, actions,
+//! answers...). The keyboard selection and the pointer hover are tracked
+//! separately, so moving the mouse never changes what Enter runs.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -9,110 +10,34 @@ use gtk::prelude::*;
 use gtk::{gio, pango};
 use gtk4 as gtk;
 
-use crate::theme::{self, TextStyle, BRIGHT, CHIP_EDGE, CHIP_FILL, CREAM, DIM, FAINT, HAIR, ROW_HOVER};
+use crate::theme::{self, TextStyle, BRIGHT, CHIP_EDGE, CHIP_FILL, CREAM, DIM, FAINT, HAIR, ICON_DIM, ROW_HOVER};
 
-pub const MAX_RESULTS: usize = 40;
 pub const VISIBLE_ROWS: usize = 8;
 
+pub enum Icon {
+    /// An app's (or a window's) icon.
+    Gicon(gio::Icon),
+    /// A Material Symbols glyph.
+    Glyph(&'static str),
+}
+
+/// One result row and what Enter (or a click) on it does.
 pub struct Entry {
-    pub app: gio::AppInfo,
-    title: String,
-    subtitle: String,
+    pub icon: Icon,
+    pub title: String,
+    pub subtitle: String,
     /// Byte ranges of `title` that matched the query.
-    matched: Vec<(usize, usize)>,
-}
-
-/// Ranks `apps` (already in alphabetical order) against `query`.
-pub fn search(apps: &[gio::AppInfo], query: &str) -> Vec<Entry> {
-    let query = query.trim().to_lowercase();
-    let mut scored: Vec<(u32, Entry)> = apps
-        .iter()
-        .filter_map(|app| {
-            let title = app.display_name().to_string();
-            let (score, matched) = score(app, &title, &query)?;
-            Some((score, Entry { app: app.clone(), subtitle: subtitle(app), title, matched }))
-        })
-        .collect();
-    // Stable, so equal scores stay alphabetical.
-    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    scored.into_iter().take(MAX_RESULTS).map(|(_, e)| e).collect()
-}
-
-/// Higher is better. Name prefix, then a word prefix, then anywhere in the
-/// name, then the command, then the query's letters in order.
-fn score(app: &gio::AppInfo, title: &str, query: &str) -> Option<(u32, Vec<(usize, usize)>)> {
-    // (byte offset, lowercased char) for each char of the title.
-    let chars: Vec<(usize, char)> = title.char_indices().map(|(i, c)| (i, c.to_lowercase().next().unwrap_or(c))).collect();
-    let lowered: String = chars.iter().map(|&(_, c)| c).collect();
-    let span = |char_start: usize, len: usize| {
-        let start = chars[char_start].0;
-        let end = chars.get(char_start + len).map_or(title.len(), |&(i, _)| i);
-        vec![(start, end)]
-    };
-    let qlen = query.chars().count();
-    // Byte offset in `lowered` of each char, to slice it by char index.
-    let offsets: Vec<usize> = lowered.char_indices().map(|(b, _)| b).collect();
-
-    if lowered.starts_with(query) {
-        return Some((4, span(0, qlen)));
-    }
-    let mut word_start = true;
-    for (i, &(_, c)) in chars.iter().enumerate() {
-        if word_start && lowered[offsets[i]..].starts_with(query) {
-            return Some((3, span(i, qlen)));
-        }
-        word_start = !c.is_alphanumeric();
-    }
-    if let Some(byte) = lowered.find(query) {
-        let at = offsets.binary_search(&byte).unwrap_or(0);
-        return Some((2, span(at, qlen)));
-    }
-    if app.executable().to_string_lossy().to_lowercase().contains(query) {
-        return Some((1, Vec::new()));
-    }
-    // Every query letter, in order, highlighted where it landed.
-    let mut matched = Vec::new();
-    let mut rest = chars.iter().enumerate();
-    for q in query.chars() {
-        let (i, _) = rest.find(|(_, (_, c))| *c == q)?;
-        matched.extend(span(i, 1));
-    }
-    Some((0, matched))
-}
-
-fn subtitle(app: &gio::AppInfo) -> String {
-    let Some(desktop) = app.downcast_ref::<gio_unix::DesktopAppInfo>() else { return String::new() };
-    if let Some(generic) = desktop.generic_name().filter(|g| !g.is_empty()) {
-        return generic.to_string();
-    }
-    let categories = desktop.categories().map(|c| c.to_string()).unwrap_or_default();
-    if categories.is_empty() {
-        return String::new();
-    }
-    const KINDS: &[(&str, &str)] = &[
-        ("TerminalEmulator", "Terminal"),
-        ("WebBrowser", "Browser"),
-        ("InstantMessaging", "Chat"),
-        ("Audio", "Media"),
-        ("AudioVideo", "Media"),
-        ("Video", "Media"),
-        ("Game", "Game"),
-        ("Development", "Dev"),
-        ("Graphics", "Graphics"),
-        ("Office", "Office"),
-        ("Settings", "System"),
-        ("System", "System"),
-        ("Utility", "Tool"),
-        ("Network", "Net"),
-    ];
-    let listed: Vec<&str> = categories.split(';').collect();
-    KINDS.iter().find(|(key, _)| listed.contains(key)).map_or("App", |(_, kind)| kind).to_owned()
+    pub matched: Vec<(usize, usize)>,
+    /// The word shown on the selected row: "Launch", "Copy", "Open"...
+    pub verb: &'static str,
+    pub action: Rc<dyn Fn()>,
 }
 
 struct Row {
     widget: gtk::Overlay,
     background: gtk::DrawingArea,
     icon: gtk::Image,
+    glyph: gtk::Label,
     title: gtk::Label,
     subtitle: gtk::Label,
     verb: gtk::Label,
@@ -120,6 +45,7 @@ struct Row {
 
 pub struct ResultList {
     pub widget: gtk::Box,
+    header: gtk::Label,
     s: f64,
     entries: RefCell<Vec<Entry>>,
     rows: Vec<Row>,
@@ -127,26 +53,28 @@ pub struct ResultList {
     offset: Cell<usize>,
     selected: Cell<usize>,
     hovered: Cell<Option<usize>>,
-    launch: RefCell<Option<Box<dyn Fn(gio::AppInfo)>>>,
+    run: RefCell<Option<Box<dyn Fn(Rc<dyn Fn()>)>>>,
 }
 
 impl ResultList {
     pub fn new(s: f64) -> Rc<Self> {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, (2.0 * s).round() as i32);
-        widget.append(&section_header(s, "APP"));
+        let (header_widget, header) = section_header(s);
+        widget.append(&header_widget);
         let rows: Vec<Row> = (0..VISIBLE_ROWS).map(|_| Row::new(s)).collect();
         for row in &rows {
             widget.append(&row.widget);
         }
         let list = Rc::new(Self {
             widget,
+            header,
             s,
             entries: RefCell::default(),
             rows,
             offset: Cell::new(0),
             selected: Cell::new(0),
             hovered: Cell::new(None),
-            launch: RefCell::default(),
+            run: RefCell::default(),
         });
         for (slot, row) in list.rows.iter().enumerate() {
             list.connect_row(slot, row);
@@ -154,8 +82,14 @@ impl ResultList {
         list
     }
 
-    pub fn connect_launch(&self, f: impl Fn(gio::AppInfo) + 'static) {
-        *self.launch.borrow_mut() = Some(Box::new(f));
+    /// `f` gets the action of a row that's activated, to run it.
+    pub fn connect_run(&self, f: impl Fn(Rc<dyn Fn()>) + 'static) {
+        *self.run.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// The section header's text, e.g. "APPS" or "ACTIONS".
+    pub fn set_section(&self, name: &str) {
+        self.header.set_text(name);
     }
 
     /// Height for `count` results: rows, gaps and the section header.
@@ -197,9 +131,9 @@ impl ResultList {
     }
 
     fn activate(&self, index: usize) {
-        let Some(app) = self.entries.borrow().get(index).map(|e| e.app.clone()) else { return };
-        if let Some(launch) = self.launch.borrow().as_ref() {
-            launch(app);
+        let Some(action) = self.entries.borrow().get(index).map(|e| e.action.clone()) else { return };
+        if let Some(run) = self.run.borrow().as_ref() {
+            run(action);
         }
     }
 
@@ -270,9 +204,17 @@ impl ResultList {
             };
             let selected = index == self.selected.get();
             row.widget.set_visible(true);
-            match entry.app.icon() {
-                Some(icon) => row.icon.set_from_gicon(&icon),
-                None => row.icon.set_icon_name(Some("application-x-executable")),
+            match &entry.icon {
+                Icon::Gicon(icon) => {
+                    row.icon.set_from_gicon(icon);
+                    row.icon.set_visible(true);
+                    row.glyph.set_visible(false);
+                }
+                Icon::Glyph(name) => {
+                    row.glyph.set_text(name);
+                    row.icon.set_visible(false);
+                    row.glyph.set_visible(true);
+                }
             }
 
             let title_style = if selected { TextStyle::new(13.0 * s, pango::Weight::Semibold, BRIGHT) } else { TextStyle::new(13.0 * s, pango::Weight::Normal, CREAM) };
@@ -290,6 +232,7 @@ impl ResultList {
             row.subtitle.set_text(&entry.subtitle);
             row.subtitle.set_visible(!entry.subtitle.is_empty());
             TextStyle::new(10.0 * s, pango::Weight::Normal, if selected { DIM } else { FAINT }).apply(&row.subtitle);
+            row.verb.set_text(entry.verb);
             row.verb.set_visible(selected);
             row.background.queue_draw();
         }
@@ -303,6 +246,9 @@ impl Row {
         background.set_size_request(-1, (40.0 * s).round() as i32);
 
         let icon = gtk::Image::builder().pixel_size((22.0 * s).round() as i32).valign(gtk::Align::Center).build();
+        let glyph = theme::icon_glyph("bolt", 19.0 * s, ICON_DIM);
+        glyph.set_size_request((22.0 * s).round() as i32, -1);
+        glyph.set_visible(false);
         let text_label = |style: TextStyle| {
             let label = style.label("");
             label.set_xalign(0.0);
@@ -326,6 +272,7 @@ impl Row {
 
         let content = gtk::Box::builder().margin_start(pad).margin_end(pad).build();
         content.append(&icon);
+        content.append(&glyph);
         content.append(&text);
         content.append(&verb);
 
@@ -333,26 +280,22 @@ impl Row {
         widget.set_child(Some(&background));
         widget.add_overlay(&content);
         widget.set_cursor_from_name(Some("pointer"));
-        Self { widget, background, icon, title, subtitle, verb }
+        Self { widget, background, icon, glyph, title, subtitle, verb }
     }
 }
 
-fn section_header(s: f64, name: &str) -> gtk::Overlay {
-    let pad = 10.0 * s;
-    let rule = gtk::DrawingArea::new();
-    rule.set_size_request(-1, (18.0 * s).round() as i32);
-    rule.set_draw_func(move |_, cr, w, h| {
-        let y = (f64::from(h) / 2.0).floor();
-        cr.rectangle(pad + 70.0 * s, y, f64::from(w) - pad * 2.0 - 70.0 * s, 1.0);
+fn section_header(s: f64) -> (gtk::Box, gtk::Label) {
+    let pad = (10.0 * s).round() as i32;
+    let row = gtk::Box::builder().spacing(pad).margin_start(pad).margin_end(pad).height_request((18.0 * s).round() as i32).build();
+    let label = TextStyle::new(9.0 * s, pango::Weight::Normal, FAINT).tracking(1.0).label("APPS");
+    label.set_valign(gtk::Align::Center);
+    row.append(&label);
+    let rule = gtk::DrawingArea::builder().hexpand(true).build();
+    rule.set_draw_func(|_, cr, w, h| {
+        cr.rectangle(0.0, (f64::from(h) / 2.0).floor(), f64::from(w), 1.0);
         theme::set_source(cr, HAIR);
         let _ = cr.fill();
     });
-    let label = TextStyle::new(9.0 * s, pango::Weight::Normal, FAINT).tracking(1.0).label(name);
-    label.set_halign(gtk::Align::Start);
-    label.set_valign(gtk::Align::Center);
-    label.set_margin_start(pad.round() as i32);
-    let header = gtk::Overlay::new();
-    header.set_child(Some(&rule));
-    header.add_overlay(&label);
-    header
+    row.append(&rule);
+    (row, label)
 }

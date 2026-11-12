@@ -23,7 +23,7 @@ const DRAIN_MS: f64 = 180.0;
 /// Device pixels of hero height to decode the wallpaper at: enough to
 /// cover the card's hero on a 1.5x display without upscaling.
 const HERO_DECODE_HEIGHT: i32 = 1000;
-const LOCK: &str = "pgrep -qf '[l]ock_shell.qml' || $HOME/.local/share/quickshell-lockscreen/lock.sh";
+pub const LOCK: &str = "pgrep -qf '[l]ock_shell.qml' || $HOME/.local/share/quickshell-lockscreen/lock.sh";
 
 #[derive(Clone, Copy)]
 enum Action {

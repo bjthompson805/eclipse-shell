@@ -1,12 +1,18 @@
 //! App launcher: a full-screen Overlay-layer surface that takes the keyboard,
 //! blurs and dims the desktop, and shows a card with a search row over either
-//! the resting dashboard (empty query) or ranked app results.
+//! the resting dashboard (empty query) or results. What a query finds is up
+//! to the providers (see [`providers`]); a leading /, =, ? and so on picks a
+//! mode.
 //!
 //! The grainy blur behind it is Hyprland's own: a layer rule turns on blur for
 //! this surface, and while the launcher is open the blur size is raised to
 //! `LAUNCHER_BLUR` (one pass at that size gives the grain), then restored.
 
 mod dashboard;
+mod extras;
+mod grid;
+mod help;
+mod providers;
 mod results;
 
 use std::cell::{Cell, RefCell};
@@ -39,8 +45,16 @@ struct Card {
     placeholder: gtk::Label,
     counter: gtk::Label,
     dashboard: gtk::Overlay,
+    /// The now-playing card's slot, under the dashboard.
+    now_playing: gtk::Box,
+    /// Tabs over the results, for modes that have them.
+    tabs: gtk::Box,
     list: Rc<ResultList>,
     empty: gtk::Label,
+    grid: Rc<grid::Grid>,
+    help: gtk::Box,
+    /// Connected Bluetooth devices, under the card.
+    bubbles: gtk::Box,
 }
 
 pub struct Launcher {
@@ -49,6 +63,14 @@ pub struct Launcher {
     stage: gtk::Fixed,
     card: RefCell<Option<Card>>,
     apps: RefCell<Vec<gio::AppInfo>>,
+    windows: RefCell<Vec<providers::windows::Window>>,
+    /// The chosen tab, and how many the mode showing has.
+    tab: Cell<usize>,
+    tab_count: Cell<usize>,
+    /// With an empty query: the all-apps grid or the help panel instead of
+    /// the dashboard.
+    showing_grid: Cell<bool>,
+    showing_help: Cell<bool>,
     /// Screen size, from the scrim's allocation.
     screen: Cell<(f64, f64)>,
     /// Card's top-left on screen.
@@ -96,6 +118,11 @@ impl Launcher {
             stage,
             card: RefCell::default(),
             apps: RefCell::default(),
+            windows: RefCell::default(),
+            tab: Cell::new(0),
+            tab_count: Cell::new(0),
+            showing_grid: Cell::new(false),
+            showing_help: Cell::new(false),
             screen: Cell::new((0.0, 0.0)),
             origin: Cell::new((0.0, 0.0)),
             openness: Tween::shared(OPEN_MS, MORPH),
@@ -149,6 +176,13 @@ impl Launcher {
         let mut apps: Vec<_> = gio::AppInfo::all().into_iter().filter(|a| a.should_show()).collect();
         apps.sort_by_cached_key(|a| a.display_name().to_lowercase());
         *self.apps.borrow_mut() = apps;
+        *self.windows.borrow_mut() = providers::windows::read();
+        self.tab.set(0);
+        self.showing_grid.set(false);
+        self.showing_help.set(false);
+        if let Some(card) = self.card.borrow().as_ref() {
+            extras::fill_bubbles(&card.bubbles, card.s);
+        }
 
         self.open.set(true);
         if let Some(card) = self.card.borrow().as_ref() {
@@ -221,6 +255,13 @@ impl Launcher {
         }
         let height = self.height.borrow().value.round() as i32;
         card.background.set_size_request(card.width.round() as i32, height);
+        // The bubbles ride under the card.
+        let below = gsk::Transform::new()
+            .translate(&graphene::Point::new((x + card.width * (1.0 - scale) / 2.0) as f32, (y + (f64::from(height) + 14.0 * card.s) * scale) as f32))
+            .scale(scale as f32, scale as f32);
+        self.stage.set_child_transform(&card.bubbles, Some(&below));
+        card.bubbles.set_opacity(Easing::OutCubic.apply(t));
+        card.bubbles.set_size_request(card.width.round() as i32, -1);
     }
 
     fn natural_height(&self) -> f64 {
@@ -230,20 +271,45 @@ impl Launcher {
         f64::from(natural)
     }
 
-    /// Shows the dashboard, results or "No matches" for the current query.
+    /// Shows the dashboard, or what the providers found for the query.
     fn refresh(self: &Rc<Self>) {
         {
             let card = self.card.borrow();
             let Some(card) = card.as_ref() else { return };
             let query = card.query.text();
             let resting = query.is_empty();
+            let grid = resting && self.showing_grid.get();
+            let help = resting && !grid && self.showing_help.get();
             card.placeholder.set_visible(resting);
-            card.dashboard.set_visible(resting);
+            card.dashboard.set_visible(resting && !grid && !help);
+            card.now_playing.set_visible(resting && !grid && !help);
+            card.grid.widget.set_visible(grid);
+            card.help.set_visible(help);
 
-            let entries = if resting { Vec::new() } else { results::search(&self.apps.borrow(), &query) };
-            let count = entries.len();
-            card.counter.set_text(&if resting { String::new() } else { format!("{count} / {}", self.apps.borrow().len()) });
-            card.list.set_entries(entries);
+            let routed = if resting {
+                None
+            } else {
+                let weak = Rc::downgrade(self);
+                let notify: Rc<dyn Fn()> = Rc::new(move || {
+                    // A slow provider came back; only matters while open.
+                    if let Some(l) = weak.upgrade().filter(|l| l.open.get()) {
+                        glib::idle_add_local_once(move || l.refresh());
+                    }
+                });
+                let apps = self.apps.borrow().clone();
+                let windows = self.windows.borrow().clone();
+                Some(providers::route(&query, &providers::Context { apps, windows, tab: self.tab.get(), notify }))
+            };
+            let count = routed.as_ref().map_or(0, |r| r.entries.len());
+            card.counter.set_text(&if resting { String::new() } else { count.to_string() });
+            self.show_tabs(card, routed.as_ref().and_then(|r| r.tabs));
+            if let Some(routed) = routed {
+                card.list.set_section(routed.section);
+                card.empty.set_text(routed.empty);
+                card.list.set_entries(routed.entries);
+            } else {
+                card.list.set_entries(Vec::new());
+            }
             card.list.widget.set_visible(!resting && count > 0);
             card.list.widget.set_size_request(-1, ResultList::height(card.s, count).round() as i32);
             card.empty.set_visible(!resting && count == 0);
@@ -258,12 +324,84 @@ impl Launcher {
         });
     }
 
-    fn launch(self: &Rc<Self>, app: gio::AppInfo) {
+    /// Closes, then runs a picked row's action.
+    fn run(self: &Rc<Self>, action: Rc<dyn Fn()>) {
         self.hide();
-        let context = WidgetExt::display(&self.window).app_launch_context();
-        if let Err(err) = app.launch(&[], Some(&context)) {
-            eprintln!("eclipse-shell: launching {} failed: {err}", app.display_name());
+        action();
+    }
+
+    /// The tab row: `tabs` lit at the chosen one, or hidden for None.
+    fn show_tabs(self: &Rc<Self>, card: &Card, tabs: Option<&'static [&'static str]>) {
+        while let Some(child) = card.tabs.first_child() {
+            card.tabs.remove(&child);
         }
+        self.tab_count.set(tabs.map_or(0, <[_]>::len));
+        card.tabs.set_visible(tabs.is_some());
+        let Some(tabs) = tabs else { return };
+        let s = card.s;
+        let chosen = self.tab.get().min(tabs.len() - 1);
+        for (i, name) in tabs.iter().enumerate() {
+            let on = i == chosen;
+            let label = TextStyle::new(10.0 * s, pango::Weight::Semibold, if on { CREAM } else { FAINT }).tracking(1.0 * s).label(&name.to_uppercase());
+            let column = gtk::Box::new(gtk::Orientation::Vertical, (3.0 * s).round() as i32);
+            column.append(&label);
+            let line = gtk::DrawingArea::builder().content_height((2.0 * s).round() as i32).build();
+            line.set_draw_func(move |_, cr, w, h| {
+                if on {
+                    theme::rounded_rect(cr, 0.0, 0.0, f64::from(w), f64::from(h), f64::from(h) / 2.0);
+                    theme::set_source(cr, theme::palette().accent);
+                    let _ = cr.fill();
+                }
+            });
+            column.append(&line);
+            let launcher = Rc::downgrade(self);
+            crate::popout::on_click(&column, move || {
+                if let Some(l) = launcher.upgrade() {
+                    l.tab.set(i);
+                    l.refresh();
+                }
+            });
+            card.tabs.append(&column);
+        }
+    }
+
+    /// Shows or hides the all-apps grid.
+    fn toggle_grid(self: &Rc<Self>) {
+        let on = !self.showing_grid.get();
+        self.showing_grid.set(on);
+        self.showing_help.set(false);
+        if let Some(card) = self.card.borrow().as_ref() {
+            if on {
+                card.grid.set_apps(providers::apps::all_by_use(&self.apps.borrow()));
+            }
+            if !card.query.text().is_empty() {
+                card.query.set_text("");
+            }
+        }
+        self.refresh();
+    }
+
+    fn toggle_help(self: &Rc<Self>) {
+        let on = !self.showing_help.get();
+        self.showing_help.set(on);
+        self.showing_grid.set(false);
+        if let Some(card) = self.card.borrow().as_ref() {
+            if !card.query.text().is_empty() {
+                card.query.set_text("");
+            }
+        }
+        self.refresh();
+    }
+
+    /// Moves to the next or previous tab, if the mode has tabs.
+    fn step_tab(self: &Rc<Self>, delta: isize) -> bool {
+        let count = self.tab_count.get();
+        if count == 0 {
+            return false;
+        }
+        self.tab.set((self.tab.get() as isize + delta).rem_euclid(count as isize) as usize);
+        self.refresh();
+        true
     }
 
     fn connect_input(self: &Rc<Self>) {
@@ -272,11 +410,38 @@ impl Launcher {
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         keys.connect_key_pressed({
             let launcher = Rc::downgrade(self);
-            move |_, key, _, _| {
+            move |_, key, _, modifiers| {
                 let Some(launcher) = launcher.upgrade() else { return glib::Propagation::Proceed };
-                let list = launcher.card.borrow().as_ref().map(|c| c.list.clone());
-                let Some(list) = list else { return glib::Propagation::Proceed };
+                let parts = launcher.card.borrow().as_ref().map(|c| (c.list.clone(), c.grid.clone(), c.query.text().is_empty()));
+                let Some((list, grid, empty)) = parts else { return glib::Propagation::Proceed };
+                if key == gdk::Key::a && modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+                    launcher.toggle_grid();
+                    return glib::Propagation::Stop;
+                }
+                if key == gdk::Key::F1 {
+                    launcher.toggle_help();
+                    return glib::Propagation::Stop;
+                }
+                // The grid or help, while showing: Esc goes back to the dashboard.
+                if empty && launcher.showing_grid.get() {
+                    match key {
+                        gdk::Key::Escape => launcher.toggle_grid(),
+                        gdk::Key::Left | gdk::Key::ISO_Left_Tab => grid.step(-1, 0),
+                        gdk::Key::Right | gdk::Key::Tab => grid.step(1, 0),
+                        gdk::Key::Up => grid.step(0, -1),
+                        gdk::Key::Down => grid.step(0, 1),
+                        gdk::Key::Return | gdk::Key::KP_Enter => grid.activate_selected(),
+                        _ => return glib::Propagation::Proceed,
+                    }
+                    return glib::Propagation::Stop;
+                }
+                if empty && launcher.showing_help.get() && key == gdk::Key::Escape {
+                    launcher.toggle_help();
+                    return glib::Propagation::Stop;
+                }
                 match key {
+                    gdk::Key::Left if launcher.step_tab(-1) => {}
+                    gdk::Key::Right if launcher.step_tab(1) => {}
                     gdk::Key::Escape => launcher.hide(),
                     gdk::Key::Down | gdk::Key::Tab => list.step(1),
                     gdk::Key::Up | gdk::Key::ISO_Left_Tab => list.step(-1),
@@ -311,6 +476,7 @@ impl Launcher {
         if let Some(old) = self.card.take() {
             self.stage.remove(&old.background);
             self.stage.remove(&old.column);
+            self.stage.remove(&old.bubbles);
         }
         let px = |v: f64| (v * s).round() as i32;
         let width = (560.0 * s).round();
@@ -329,7 +495,7 @@ impl Launcher {
         // Search row: mark, query, result counter, help and all-apps buttons.
         let query = gtk::Text::builder().hexpand(true).valign(gtk::Align::Center).build();
         query.set_attributes(Some(&TextStyle::new(14.0 * s, pango::Weight::Normal, CREAM).attrs()));
-        let placeholder = TextStyle::new(14.0 * s, pango::Weight::Normal, FAINT).label("Search apps, type / for commands");
+        let placeholder = TextStyle::new(14.0 * s, pango::Weight::Normal, FAINT).label("Search apps · / actions · = calc · ? web");
         placeholder.set_halign(gtk::Align::Start);
         placeholder.set_can_target(false);
         let field = gtk::Overlay::builder().hexpand(true).margin_start(px(12.0)).margin_end(px(10.0)).build();
@@ -345,11 +511,16 @@ impl Launcher {
         search_row.append(&glyph);
         search_row.append(&field);
         search_row.append(&counter);
-        search_row.append(&help_button(s));
-        let grid = grid_button(s);
-        grid.set_margin_start(px(4.0));
-        grid.set_margin_end(px(10.0));
-        search_row.append(&grid);
+        let help_toggle = help_button(s);
+        let launcher = Rc::downgrade(self);
+        crate::popout::on_click(&help_toggle, move || launcher.upgrade().into_iter().for_each(|l| l.toggle_help()));
+        search_row.append(&help_toggle);
+        let grid_toggle = grid_button(s);
+        grid_toggle.set_margin_start(px(4.0));
+        grid_toggle.set_margin_end(px(10.0));
+        let launcher = Rc::downgrade(self);
+        crate::popout::on_click(&grid_toggle, move || launcher.upgrade().into_iter().for_each(|l| l.toggle_grid()));
+        search_row.append(&grid_toggle);
 
         let divider = gtk::DrawingArea::builder().height_request(1).margin_top(px(6.0)).margin_start(px(16.0)).margin_end(px(16.0)).build();
         divider.set_draw_func(|_, cr, w, h| {
@@ -364,16 +535,41 @@ impl Launcher {
         dashboard.set_margin_start(px(16.0));
         dashboard.set_margin_end(px(16.0));
 
+        let now_playing = gtk::Box::builder().margin_start(px(16.0)).margin_end(px(16.0)).margin_bottom(px(12.0)).build();
+        let card_widget = extras::now_playing(s);
+        card_widget.set_hexpand(true);
+        now_playing.append(&card_widget);
+
+        let grid = grid::Grid::new(s);
+        grid.widget.set_margin_start(px(10.0));
+        grid.widget.set_margin_end(px(10.0));
+        grid.widget.set_margin_top(px(10.0));
+        grid.widget.set_margin_bottom(px(10.0));
+        grid.widget.set_visible(false);
+        grid.connect_run({
+            let launcher = Rc::downgrade(self);
+            move |app| {
+                if let Some(l) = launcher.upgrade() {
+                    l.run(Rc::new(move || providers::apps::launch(&app)));
+                }
+            }
+        });
+        let help = help::panel(s);
+        help.set_visible(false);
+        let bubbles = extras::bubbles(s);
+
+        let tabs = gtk::Box::builder().spacing(px(16.0)).margin_top(px(10.0)).margin_start(px(18.0)).margin_end(px(18.0)).visible(false).build();
+
         let list = ResultList::new(s);
         list.widget.set_margin_top(px(6.0));
         list.widget.set_margin_bottom(px(12.0));
         list.widget.set_margin_start(px(6.0));
         list.widget.set_margin_end(px(6.0));
-        list.connect_launch({
+        list.connect_run({
             let launcher = Rc::downgrade(self);
-            move |app| {
+            move |action| {
                 if let Some(launcher) = launcher.upgrade() {
-                    launcher.launch(app);
+                    launcher.run(action);
                 }
             }
         });
@@ -386,7 +582,7 @@ impl Launcher {
 
         let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
         column.set_size_request(width as i32, -1);
-        for part in [search_row.upcast_ref::<gtk::Widget>(), divider.upcast_ref(), dashboard.upcast_ref(), list.widget.upcast_ref(), empty.upcast_ref()] {
+        for part in [search_row.upcast_ref::<gtk::Widget>(), divider.upcast_ref(), dashboard.upcast_ref(), now_playing.upcast_ref(), tabs.upcast_ref(), list.widget.upcast_ref(), empty.upcast_ref(), grid.widget.upcast_ref(), help.upcast_ref()] {
             column.append(part);
         }
 
@@ -401,6 +597,7 @@ impl Launcher {
 
         self.stage.put(&background, 0.0, 0.0);
         self.stage.put(&column, 0.0, 0.0);
+        self.stage.put(&bubbles, 0.0, 0.0);
         theme::on_palette_change({
             let background = background.downgrade();
             move || {
@@ -409,7 +606,7 @@ impl Launcher {
                 }
             }
         });
-        *self.card.borrow_mut() = Some(Card { s, width, background, column, query, placeholder, counter, dashboard, list, empty });
+        *self.card.borrow_mut() = Some(Card { s, width, background, column, query, placeholder, counter, dashboard, now_playing, tabs, list, empty, grid, help, bubbles });
     }
 }
 
@@ -461,7 +658,7 @@ fn icon_tint(hovered: bool) -> theme::Rgba {
     if hovered { theme::palette().accent_lit } else { ICON_DIM }
 }
 
-/// "?" opens the cheat sheet (not built yet).
+/// "?" opens the help panel.
 fn help_button(s: f64) -> gtk::DrawingArea {
     square_button(s, move |cr, w, h, hovered| {
         let layout = pangocairo_layout(cr, "?", TextStyle::new(15.0 * s, pango::Weight::Semibold, icon_tint(hovered)));
@@ -472,7 +669,7 @@ fn help_button(s: f64) -> gtk::DrawingArea {
     })
 }
 
-/// A 3×3 grid of dots; opens the all-apps grid (not built yet).
+/// A 3×3 grid of dots; opens the all-apps grid.
 fn grid_button(s: f64) -> gtk::DrawingArea {
     square_button(s, move |cr, w, h, hovered| {
         let (dot, gap) = (3.5 * s, 3.0 * s);
