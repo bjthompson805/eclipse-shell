@@ -1,6 +1,6 @@
 //! Status cluster: volume, display brightness, network, Bluetooth and
 //! battery, as a row of glyphs. Scrolling the volume or brightness glyph
-//! nudges it; clicking the volume glyph opens the mixer.
+//! nudges it; clicking the volume glyph, the sun or the battery opens its popout.
 //!
 //! One small shell script gathers every reading every two seconds (wpctl,
 //! backlight, ifconfig, hccontrol, sysctl), and again right after a scroll.
@@ -66,8 +66,9 @@ impl Battery {
     }
 }
 
-/// `on_volume` and `on_battery` open the mixer and battery popouts under the given x.
-pub fn status(s: f64, on_volume: Rc<dyn Fn(f64)>, on_battery: Rc<dyn Fn(f64)>) -> gtk::Box {
+/// `on_volume`, `on_display` and `on_battery` open the mixer, display and
+/// battery popouts under the given x.
+pub fn status(s: f64, on_volume: Rc<dyn Fn(f64)>, on_display: Rc<dyn Fn(f64)>, on_battery: Rc<dyn Fn(f64)>) -> gtk::Box {
     let glyph_px = 14.0 * s;
     let slot = (glyph_px + 4.0 * s).round() as i32;
     let row = gtk::Box::new(gtk::Orientation::Horizontal, (9.0 * s).round() as i32);
@@ -89,6 +90,7 @@ pub fn status(s: f64, on_volume: Rc<dyn Fn(f64)>, on_battery: Rc<dyn Fn(f64)>) -
     battery_row.append(&battery_pct);
     row.append(&battery_row);
     on_click(&volume, on_volume);
+    on_click(&sun, on_display);
     on_click(&battery_row, on_battery);
 
     let reading = Rc::new(RefCell::new(Reading::default()));

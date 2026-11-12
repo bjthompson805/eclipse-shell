@@ -4,6 +4,8 @@ mod bar;
 mod battery_popout;
 mod calendar;
 mod config;
+mod display_popout;
+mod fader;
 mod hyprland;
 mod icons;
 mod launcher;
@@ -30,6 +32,7 @@ use gtk4 as gtk;
 use bar::{Actions, Bar};
 use battery_popout::BatteryPopout;
 use calendar::Calendar;
+use display_popout::DisplayPopout;
 use hyprland::State;
 use launcher::Launcher;
 use mixer_popout::MixerPopout;
@@ -50,6 +53,7 @@ struct Shell {
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
     mixer: Rc<MixerPopout>,
+    display: Rc<DisplayPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -72,6 +76,7 @@ impl Shell {
         self.calendar.set_monitor(focused.clone());
         self.usage.set_monitor(focused.clone());
         self.mixer.set_monitor(focused.clone());
+        self.display.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -97,13 +102,15 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         bar.destroy();
     }
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
-    let (mixer, battery, window, resources) = (shell_ref.mixer.clone(), shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
+    let (mixer, display_popout) = (shell_ref.mixer.clone(), shell_ref.display.clone());
+    let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
         power: Rc::new(move || power.toggle()),
         calendar: Rc::new(move |x| calendar.toggle(x)),
         usage: Rc::new(move |x| usage.toggle(x)),
         mixer: Rc::new(move |x| mixer.toggle(x)),
+        display: Rc::new(move |x| display_popout.toggle(x)),
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
         resources: Rc::new(move |x| resources.toggle(x)),
@@ -123,6 +130,7 @@ struct Surfaces {
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
     mixer: Rc<MixerPopout>,
+    display: Rc<DisplayPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -149,16 +157,18 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     media::start();
     agent_usage::start();
     sysstats::start();
+    display_popout::restore();
 
     let launcher = Launcher::new(app);
     let power = Power::new(app);
     let calendar = Calendar::new(app);
     let usage = UsagePopout::new(app);
     let mixer = MixerPopout::new(app);
+    let display_popout = DisplayPopout::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -178,7 +188,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -236,6 +246,14 @@ fn main() -> glib::ExitCode {
                     let shell = surfaces.shell.borrow();
                     if let Some(x) = shell.focused_bar().and_then(Bar::volume_x) {
                         surfaces.mixer.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-display") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    if let Some(x) = shell.focused_bar().and_then(Bar::display_x) {
+                        surfaces.display.toggle(x);
                     }
                 }
             }

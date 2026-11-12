@@ -213,3 +213,23 @@ pub fn divider() -> gtk::DrawingArea {
     });
     line
 }
+
+/// Calls `f` with true as the pointer enters `widget` and false as it leaves.
+pub fn on_hover(widget: &impl IsA<gtk::Widget>, f: impl Fn(bool) + 'static) {
+    let f = Rc::new(f);
+    let motion = gtk::EventControllerMotion::new();
+    motion.connect_enter({
+        let f = f.clone();
+        move |_, _, _| f(true)
+    });
+    motion.connect_leave(move |_| f(false));
+    widget.add_controller(motion);
+}
+
+/// Calls `f` when `widget` is clicked, and shows a pointer over it.
+pub fn on_click(widget: &impl IsA<gtk::Widget>, f: impl Fn() + 'static) {
+    widget.set_cursor_from_name(Some("pointer"));
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |_, _, _, _| f());
+    widget.add_controller(click);
+}

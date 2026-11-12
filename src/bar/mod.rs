@@ -42,6 +42,7 @@ pub struct Actions {
     pub calendar: Rc<dyn Fn(f64)>,
     pub usage: Rc<dyn Fn(f64)>,
     pub mixer: Rc<dyn Fn(f64)>,
+    pub display: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
@@ -53,6 +54,7 @@ struct Anchors {
     stats: Option<gtk::Widget>,
     usage: Option<gtk::Widget>,
     volume: Option<gtk::Widget>,
+    display: Option<gtk::Widget>,
     battery: Option<gtk::Widget>,
 }
 
@@ -147,6 +149,11 @@ impl Bar {
     /// Where the volume glyph's centre sits, if the bar shows it.
     pub fn volume_x(&self) -> Option<f64> {
         centre_x(self.anchors.volume.as_ref()?)
+    }
+
+    /// Where the sun's centre sits, if the bar shows it.
+    pub fn display_x(&self) -> Option<f64> {
+        self.anchors.display.as_ref().filter(|d| d.is_visible()).and_then(centre_x)
     }
 
     /// Where the battery's centre sits, if the bar shows it.
@@ -345,9 +352,10 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         right.append(&speed.widget);
     }
     if config::BAR_STATUS {
-        let cluster = status::status(s, actions.mixer.clone(), actions.battery.clone());
-        // Volume is the cluster's first glyph, the battery its last.
+        let cluster = status::status(s, actions.mixer.clone(), actions.display.clone(), actions.battery.clone());
+        // Volume and the sun lead the cluster; the battery ends it.
         anchors.volume = cluster.first_child();
+        anchors.display = anchors.volume.as_ref().and_then(|v| v.next_sibling());
         anchors.battery = cluster.last_child();
         let status = Module::new(&cluster, ModuleSpec { interactive: false, ..pill(8.0 * s) });
         right.append(&status.widget);

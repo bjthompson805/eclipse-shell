@@ -11,25 +11,23 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gtk::prelude::*;
-use gtk::{cairo, gdk, gio, glib, pango};
+use gtk::{gdk, gio, glib, pango};
 use gtk4 as gtk;
 
+use crate::fader::{self, Fader};
 use crate::icons;
-use crate::popout::{self, Anchor, Popout};
-use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, DIM, FAINT, ICON_DIM, SUBTLE};
+use crate::popout::{self, on_click, on_hover, Anchor, Popout};
+use crate::theme::{self, TextStyle, CREAM, FAINT, ICON_DIM, SUBTLE};
 
 const NAMESPACE: &str = "eclipse-shell-mixer";
 const TICK: Duration = Duration::from_secs(1);
 const WIDTH: f64 = 340.0;
-/// How long a fader ignores readings after it's moved, so a reading already
-/// under way can't snap it back.
-const SETTLE: Duration = Duration::from_millis(1500);
+
 /// The most often a drag sends a volume.
 const SEND_EVERY: Duration = Duration::from_millis(40);
-const SCROLL_STEP: f64 = 0.05;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -258,7 +256,7 @@ impl MixerPopout {
         device.append(&head);
         if let Some(node) = node {
             let glyphs = if kind == Kind::Output { ("volume_up", "volume_off") } else { ("mic", "mic_off") };
-            let fader = Fader::new(s, node, glyphs, 17.0 * s, true);
+            let fader = volume_fader(s, node, glyphs, 17.0 * s, true);
             device.append(&fader.widget);
             self.faders.borrow_mut().insert(node.id, fader);
         }
@@ -296,7 +294,7 @@ impl MixerPopout {
         let name = TextStyle::new(10.5 * s, pango::Weight::Semibold, SUBTLE).label(&node.label);
         fill(&name);
         head.append(&name);
-        let fader = Fader::new(s, node, ("volume_up", "volume_off"), 15.0 * s, false);
+        let fader = volume_fader(s, node, ("volume_up", "volume_off"), 15.0 * s, false);
         head.append(&fader.glyph);
         row.append(&head);
         row.append(&fader.widget);
@@ -404,217 +402,16 @@ fn spawn(argv: &[&str]) {
     }
 }
 
-// ---- fader -------------------------------------------------------------------
-
-/// A thin track with an accent fill and a resting tick, a percentage, and a
-/// glyph that mutes. Drag or scroll the track to change the volume.
-struct Fader {
-    id: u32,
-    s: f64,
-    value: Cell<f64>,
-    muted: Cell<bool>,
-    lit: Cell<bool>,
-    dragging: Cell<bool>,
-    /// When the user last changed it.
-    touched: Cell<Option<Instant>>,
-    sent: Cell<Option<Instant>>,
-    widget: gtk::Box,
-    track: gtk::DrawingArea,
-    readout: gtk::Label,
-    /// The mute glyph, inside `widget` or for the caller to place.
-    glyph: gtk::Label,
-    glyphs: (&'static str, &'static str),
-    glyph_px: f64,
-}
-
-impl Fader {
-    fn new(s: f64, node: &Node, glyphs: (&'static str, &'static str), glyph_px: f64, inline: bool) -> Rc<Self> {
-        let px = |v: f64| (v * s).round() as i32;
-        let widget = gtk::Box::builder().spacing(px(11.0)).height_request(px(28.0)).build();
-        let glyph = theme::icon_glyph(glyphs.0, glyph_px, ICON_DIM);
-        glyph.set_size_request(px(20.0), px(20.0));
-        glyph.set_cursor_from_name(Some("pointer"));
-        let track = gtk::DrawingArea::builder().hexpand(true).build();
-        track.set_cursor_from_name(Some("pointer"));
-        let readout = gtk::Label::new(None);
-        readout.set_size_request(px(34.0), -1);
-        readout.set_xalign(1.0);
-        if inline {
-            widget.append(&glyph);
-        }
-        widget.append(&track);
-        widget.append(&readout);
-
-        let fader = Rc::new(Self {
-            id: node.id,
-            s,
-            value: Cell::new(node.volume.clamp(0.0, 1.0)),
-            muted: Cell::new(node.muted),
-            lit: Cell::new(false),
-            dragging: Cell::new(false),
-            touched: Cell::new(None),
-            sent: Cell::new(None),
-            widget,
-            track,
-            readout,
-            glyph,
-            glyphs,
-            glyph_px,
-        });
-
-        let weak = Rc::downgrade(&fader);
-        fader.track.set_draw_func(move |_, cr, w, h| {
-            if let Some(f) = weak.upgrade() {
-                f.draw(cr, f64::from(w), f64::from(h));
-            }
-        });
-
-        let weak = Rc::downgrade(&fader);
-        on_click(&fader.glyph, move || {
-            if let Some(f) = weak.upgrade() {
-                f.muted.set(!f.muted.get());
-                f.touched.set(Some(Instant::now()));
-                spawn(&["wpctl", "set-mute", &f.id.to_string(), if f.muted.get() { "1" } else { "0" }]);
-                f.repaint();
-            }
-        });
-
-        let drag = gtk::GestureDrag::new();
-        let start = Rc::new(Cell::new(0.0));
-        drag.connect_drag_begin({
-            let (weak, start) = (Rc::downgrade(&fader), start.clone());
-            move |_, x, _| {
-                start.set(x);
-                if let Some(f) = weak.upgrade() {
-                    f.dragging.set(true);
-                    f.drag_to(x, false);
-                }
-            }
-        });
-        drag.connect_drag_update({
-            let (weak, start) = (Rc::downgrade(&fader), start.clone());
-            move |_, dx, _| weak.upgrade().into_iter().for_each(|f| f.drag_to(start.get() + dx, false))
-        });
-        drag.connect_drag_end({
-            let weak = Rc::downgrade(&fader);
-            move |_, dx, _| {
-                if let Some(f) = weak.upgrade() {
-                    f.drag_to(start.get() + dx, true);
-                    f.dragging.set(false);
-                }
-            }
-        });
-        fader.track.add_controller(drag);
-
-        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-        let weak = Rc::downgrade(&fader);
-        scroll.connect_scroll(move |_, _, dy| {
-            if let Some(f) = weak.upgrade().filter(|_| dy != 0.0) {
-                f.set_value(f.value.get() + if dy < 0.0 { SCROLL_STEP } else { -SCROLL_STEP }, true);
-            }
-            glib::Propagation::Stop
-        });
-        fader.widget.add_controller(scroll);
-
-        // Only the fader itself lights it, so hovering or clicking the
-        // device picker above leaves the tick alone.
-        let weak = Rc::downgrade(&fader);
-        on_hover(&fader.widget, move |lit| weak.upgrade().into_iter().for_each(|f| f.set_lit(lit)));
-
-        fader.repaint();
-        fader
-    }
-
-    /// Takes a reading, unless the user is moving it.
-    fn show(&self, volume: f64, muted: bool) {
-        let settling = self.touched.get().is_some_and(|t| t.elapsed() < SETTLE);
-        if self.dragging.get() || settling {
-            return;
-        }
-        let volume = volume.clamp(0.0, 1.0);
-        if (volume - self.value.get()).abs() > 0.001 || muted != self.muted.get() {
-            self.value.set(volume);
-            self.muted.set(muted);
-            self.repaint();
-        }
-    }
-
-    fn set_lit(&self, lit: bool) {
-        self.lit.set(lit);
-        self.repaint();
-    }
-
-    fn drag_to(&self, x: f64, last: bool) {
-        let width = f64::from(self.track.width()).max(1.0);
-        self.set_value(x / width, last);
-    }
-
-    /// Moves the fader; `force` sends the volume even if one went out just now.
-    fn set_value(&self, value: f64, force: bool) {
-        let value = value.clamp(0.0, 1.0);
-        self.value.set(value);
-        self.touched.set(Some(Instant::now()));
-        if force || self.sent.get().is_none_or(|t| t.elapsed() >= SEND_EVERY) {
-            self.sent.set(Some(Instant::now()));
-            spawn(&["wpctl", "set-volume", &self.id.to_string(), &format!("{value:.3}")]);
-        }
-        self.repaint();
-    }
-
-    fn repaint(&self) {
-        let (muted, lit) = (self.muted.get(), self.lit.get());
-        let text = if muted { "off".to_owned() } else { format!("{}%", (self.value.get() * 100.0).round()) };
-        self.readout.set_text(&text);
-        let color = if muted { FAINT } else if lit { CREAM } else { DIM };
-        TextStyle::new(9.5 * self.s, pango::Weight::Semibold, color).apply(&self.readout);
-        let name = if muted { self.glyphs.1 } else { self.glyphs.0 };
-        self.glyph.set_text(name);
-        let color = if muted { FAINT } else if lit { CREAM } else { ICON_DIM };
-        self.glyph.set_attributes(theme::icon_glyph(name, self.glyph_px, color).attributes().as_ref());
-        self.track.queue_draw();
-    }
-
-    fn draw(&self, cr: &cairo::Context, w: f64, h: f64) {
-        let s = self.s;
-        let palette = theme::palette();
-        let (value, muted, lit) = (self.value.get(), self.muted.get(), self.lit.get());
-        let thread = 3.0 * s;
-        let y = (h - thread) / 2.0;
-        theme::rounded_rect(cr, 0.0, y, w, thread, thread / 2.0);
-        theme::set_source(cr, BRIGHT.alpha(0.08));
-        let _ = cr.fill();
-
-        let filled = w * value;
-        if filled > 0.0 {
-            let (from, to) = match () {
-                _ if muted => (FAINT.alpha(0.5), FAINT),
-                _ if lit => (palette.accent, palette.accent_lit),
-                _ => (palette.accent.alpha(0.55), palette.accent.alpha(0.8)),
-            };
-            let gradient = cairo::LinearGradient::new(0.0, 0.0, filled, 0.0);
-            add_stop(&gradient, 0.0, from);
-            add_stop(&gradient, 1.0, to);
-            theme::rounded_rect(cr, 0.0, y, filled.max(thread), thread, thread / 2.0);
-            let _ = cr.set_source(&gradient);
-            let _ = cr.fill();
-        }
-
-        // The tick marks where the fader rests, and gives way to the fill's glow on hover.
-        if !lit {
-            let (tw, th) = (2.5 * s, 11.0 * s);
-            let x = (filled - tw / 2.0).clamp(0.0, (w - tw).max(0.0));
-            theme::rounded_rect(cr, x, (h - th) / 2.0, tw, th, tw / 2.0);
-            theme::set_source(cr, if muted { FAINT } else { SUBTLE });
-            let _ = cr.fill();
-        }
-    }
-}
-
-fn add_stop(gradient: &cairo::LinearGradient, offset: f64, c: Rgba) {
-    gradient.add_color_stop_rgba(offset, c.r, c.g, c.b, c.a);
-}
-
 // ---- pieces ------------------------------------------------------------------
+
+/// A fader that sets `node`'s volume and mute.
+fn volume_fader(s: f64, node: &Node, glyphs: (&'static str, &'static str), glyph_px: f64, inline: bool) -> Rc<Fader> {
+    let id = node.id.to_string();
+    let options = fader::Options { glyphs, glyph_px, inline, floor: 0.0, send_every: SEND_EVERY };
+    let mute_id = id.clone();
+    let on_mute: Box<dyn Fn(bool)> = Box::new(move |muted| spawn(&["wpctl", "set-mute", &mute_id, if muted { "1" } else { "0" }]));
+    Fader::new(s, node.volume, node.muted, options, move |v| spawn(&["wpctl", "set-volume", &id, &format!("{v:.3}")]), Some(on_mute))
+}
 
 /// A device in the picker: its glyph and name, with a dot on the current one.
 fn pick_row(s: f64, node: &Node, current: bool, pressed: impl Fn() + 'static) -> gtk::Overlay {
@@ -669,22 +466,4 @@ fn fill(label: &gtk::Label) {
     label.set_xalign(0.0);
     label.set_ellipsize(pango::EllipsizeMode::End);
     label.set_max_width_chars(1);
-}
-
-fn on_hover(widget: &impl IsA<gtk::Widget>, f: impl Fn(bool) + 'static) {
-    let f = Rc::new(f);
-    let motion = gtk::EventControllerMotion::new();
-    motion.connect_enter({
-        let f = f.clone();
-        move |_, _, _| f(true)
-    });
-    motion.connect_leave(move |_| f(false));
-    widget.add_controller(motion);
-}
-
-fn on_click(widget: &impl IsA<gtk::Widget>, f: impl Fn() + 'static) {
-    widget.set_cursor_from_name(Some("pointer"));
-    let click = gtk::GestureClick::new();
-    click.connect_released(move |_, _, _, _| f());
-    widget.add_controller(click);
 }
