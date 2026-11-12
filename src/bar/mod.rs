@@ -39,10 +39,11 @@ pub struct Bar {
     windows: [gtk::ApplicationWindow; 2],
     workspaces: Rc<Workspaces>,
     title: Rc<Title>,
+    clock: gtk::Widget,
 }
 
 impl Bar {
-    pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>) -> Self {
+    pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>, on_clock: Rc<dyn Fn(f64)>) -> Self {
         let s = config::bar_scale(monitor.geometry().height());
         let band = config::BAR_HEIGHT * s;
         let top = config::FRAME_EDGE + band;
@@ -85,7 +86,7 @@ impl Bar {
 
         let workspaces = Workspaces::new(s);
         let title = Title::new(s);
-        let content = band_content(s, band, &workspaces, &title, on_mark, on_power);
+        let content = band_content(s, band, &workspaces, &title, on_mark, on_power, on_clock);
         content.set_size_request(-1, top.round() as i32);
 
         let layers = gtk::Overlay::new();
@@ -95,7 +96,9 @@ impl Bar {
 
         reserve.present();
         frame.present();
-        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title }
+        // The clock floats as the band's last overlay.
+        let clock = content.last_child().expect("clock");
+        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title, clock }
     }
 
     pub fn update(&self, state: &State) {
@@ -103,11 +106,24 @@ impl Bar {
         self.title.update(state.focused.as_ref());
     }
 
+    /// Where the clock's centre sits, in logical px from the monitor's left.
+    pub fn clock_x(&self) -> Option<f64> {
+        centre_x(&self.clock)
+    }
+
     pub fn destroy(&self) {
         for window in &self.windows {
             window.destroy();
         }
     }
+}
+
+/// A widget's horizontal centre in its window. The bar's surface spans the
+/// monitor, so that is also its distance from the monitor's left edge.
+fn centre_x(widget: &gtk::Widget) -> Option<f64> {
+    let root = widget.root()?;
+    let point = widget.compute_point(&root, &gtk::graphene::Point::new(widget.width() as f32 / 2.0, 0.0))?;
+    Some(f64::from(point.x()))
 }
 
 fn layer_window(app: &gtk::Application, monitor: &gdk::Monitor, namespace: &str) -> gtk::ApplicationWindow {
@@ -164,7 +180,7 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>) -> gtk::Overlay {
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, on_mark: Rc<dyn Fn()>, on_power: Rc<dyn Fn()>, on_clock: Rc<dyn Fn(f64)>) -> gtk::Overlay {
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
     let pill = |pad_x: f64| ModuleSpec { span, pad_x, filled: true, interactive: true, square: false };
@@ -187,6 +203,14 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     left.append(&title.widget);
 
     let clock = Module::new(&clock::clock(s), pill(13.0 * s));
+    clock.connect_tapped({
+        let widget = clock.widget.downgrade();
+        move || {
+            if let Some(x) = widget.upgrade().and_then(|w| centre_x(w.upcast_ref())) {
+                on_clock(x);
+            }
+        }
+    });
 
     let power_icon = theme::icon_glyph("power_settings_new", 14.0 * s, theme::palette().accent);
     theme::on_palette_change({

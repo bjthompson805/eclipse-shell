@@ -24,6 +24,9 @@ pub struct Weather {
     /// Seconds after local midnight.
     pub sunrise: i32,
     pub sunset: i32,
+    /// Today's high and low, rounded, in the same unit as `temp`.
+    pub high: i32,
+    pub low: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,6 +37,20 @@ pub enum Glyph {
     Snow,
     Fog,
     Storm,
+}
+
+impl Glyph {
+    /// The Material Symbols name for the condition.
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Glyph::Sun => "clear_day",
+            Glyph::Cloud => "cloud",
+            Glyph::Fog => "foggy",
+            Glyph::Rain => "rainy",
+            Glyph::Snow => "weather_snowy",
+            Glyph::Storm => "thunderstorm",
+        }
+    }
 }
 
 thread_local! {
@@ -88,6 +105,8 @@ struct Current {
 struct Daily {
     sunrise: Vec<String>,
     sunset: Vec<String>,
+    temperature_2m_max: Vec<f64>,
+    temperature_2m_min: Vec<f64>,
 }
 
 async fn curl(url: &str) -> Result<String, glib::Error> {
@@ -137,7 +156,7 @@ async fn fetch() -> Result<Weather, Box<dyn std::error::Error>> {
     };
     let unit = if uses_fahrenheit() { "fahrenheit" } else { "celsius" };
     let url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code&daily=sunrise,sunset&forecast_days=1&timezone=auto&temperature_unit={unit}",
+        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto&temperature_unit={unit}",
         location.lat, location.lon
     );
     let forecast: Forecast = serde_json::from_str(&curl(&url).await?)?;
@@ -150,6 +169,8 @@ async fn fetch() -> Result<Weather, Box<dyn std::error::Error>> {
         city: location.city,
         sunrise: first(&forecast.daily.sunrise)?,
         sunset: first(&forecast.daily.sunset)?,
+        high: forecast.daily.temperature_2m_max.first().map_or(0, |t| t.round() as i32),
+        low: forecast.daily.temperature_2m_min.first().map_or(0, |t| t.round() as i32),
     })
 }
 

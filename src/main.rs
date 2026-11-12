@@ -1,11 +1,13 @@
 mod anim;
 mod bar;
+mod calendar;
 mod config;
 mod hyprland;
 mod icons;
 mod launcher;
 mod mark;
 mod media;
+mod popout;
 mod power;
 mod theme;
 mod tray;
@@ -19,6 +21,7 @@ use gtk::{gdk, gio, glib};
 use gtk4 as gtk;
 
 use bar::Bar;
+use calendar::Calendar;
 use hyprland::State;
 use launcher::Launcher;
 use power::Power;
@@ -32,6 +35,7 @@ struct Shell {
     state: State,
     launcher: Rc<Launcher>,
     power: Rc<Power>,
+    calendar: Rc<Calendar>,
 }
 
 impl Shell {
@@ -41,7 +45,8 @@ impl Shell {
         }
         let focused = monitor_named(display, self.state.focused_monitor.as_deref());
         self.launcher.set_monitor(focused.clone());
-        self.power.set_monitor(focused);
+        self.power.set_monitor(focused.clone());
+        self.calendar.set_monitor(focused);
     }
 }
 
@@ -67,10 +72,12 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
     let toggle: Rc<dyn Fn()> = Rc::new(move || launcher.toggle());
     let power = shell_ref.power.clone();
     let toggle_power: Rc<dyn Fn()> = Rc::new(move || power.toggle());
+    let calendar = shell_ref.calendar.clone();
+    let toggle_calendar: Rc<dyn Fn(f64)> = Rc::new(move |x| calendar.toggle(x));
     let monitors = display.monitors();
     shell_ref.bars = (0..monitors.n_items())
         .filter_map(|i| monitors.item(i).and_downcast::<gdk::Monitor>())
-        .map(|monitor| Bar::new(app, &monitor, toggle.clone(), toggle_power.clone()))
+        .map(|monitor| Bar::new(app, &monitor, toggle.clone(), toggle_power.clone(), toggle_calendar.clone()))
         .collect();
     shell_ref.refresh(display);
 }
@@ -79,6 +86,8 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
 struct Surfaces {
     launcher: Rc<Launcher>,
     power: Rc<Power>,
+    calendar: Rc<Calendar>,
+    shell: Rc<RefCell<Shell>>,
 }
 
 fn start(app: &gtk::Application) -> Option<Surfaces> {
@@ -102,7 +111,8 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
 
     let launcher = Launcher::new(app);
     let power = Power::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone() }));
+    let calendar = Calendar::new(app);
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -111,15 +121,18 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     });
 
     let events = hyprland::watch();
-    glib::spawn_future_local(async move {
-        while let Ok(state) = events.recv().await {
-            let mut shell = shell.borrow_mut();
-            shell.state = state;
-            shell.refresh(&display);
+    glib::spawn_future_local({
+        let shell = shell.clone();
+        async move {
+            while let Ok(state) = events.recv().await {
+                let mut shell = shell.borrow_mut();
+                shell.state = state;
+                shell.refresh(&display);
+            }
         }
     });
 
-    Some(Surfaces { launcher, power })
+    Some(Surfaces { launcher, power, calendar, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -150,6 +163,18 @@ fn main() -> glib::ExitCode {
             Some("toggle-launcher") => {
                 if let Some(surfaces) = surfaces.get() {
                     surfaces.launcher.toggle();
+                }
+            }
+            Some("toggle-calendar") => {
+                if let Some(surfaces) = surfaces.get() {
+                    // Under the focused monitor's clock, as a click on it would.
+                    let shell = surfaces.shell.borrow();
+                    let focused = shell.state.focused_monitor.as_deref();
+                    let bar = shell.bars.iter().find(|b| b.connector.as_deref() == focused).or(shell.bars.first());
+                    match bar.and_then(Bar::clock_x) {
+                        Some(x) => surfaces.calendar.toggle(x),
+                        None => surfaces.calendar.toggle_centred(),
+                    }
                 }
             }
             Some("toggle-power") => {

@@ -6,7 +6,7 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 
 use crate::theme::{self, TextStyle, SUBTLE};
-use crate::weather::{self, Glyph};
+use crate::weather;
 
 pub fn weather(s: f64) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, (4.0 * s).round() as i32);
@@ -21,15 +21,7 @@ pub fn weather(s: f64) -> gtk::Box {
         move || {
             let Some(row) = row.upgrade() else { return };
             let Some(now) = weather::current() else { return row.set_visible(false) };
-            let name = match now.glyph {
-                Glyph::Sun => "clear_day",
-                Glyph::Cloud => "cloud",
-                Glyph::Fog => "foggy",
-                Glyph::Rain => "rainy",
-                Glyph::Snow => "weather_snowy",
-                Glyph::Storm => "thunderstorm",
-            };
-            glyph.set_text(name);
+            glyph.set_text(now.glyph.symbol());
             temp.set_text(&now.temp);
             row.set_visible(true);
         }

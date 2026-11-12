@@ -12,14 +12,12 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{cairo, gdk, gio, glib, pango};
 use gtk4 as gtk;
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::anim::{self, Easing, Tween, MORPH};
+use crate::popout::{Anchor, Popout};
 use crate::theme::{self, TextStyle, BRIGHT, CREAM, FAINT, ICON_DIM, SUBTLE};
 use crate::{config, hyprland, mark};
 
 const NAMESPACE: &str = "eclipse-shell-power";
-const OPEN_MS: f64 = 260.0;
 const HOLD_MS: f64 = 1100.0;
 const DRAIN_MS: f64 = 180.0;
 /// Device pixels of hero height to decode the wallpaper at: enough to
@@ -76,121 +74,51 @@ impl Action {
 }
 
 pub struct Power {
-    window: gtk::ApplicationWindow,
-    card: gtk::Overlay,
-    openness: Rc<RefCell<Tween>>,
-    open: Cell<bool>,
-    monitor: RefCell<Option<gdk::Monitor>>,
+    popout: Rc<Popout>,
     built_for: Cell<f64>,
-    /// The card's resting distance from the top of the screen.
-    top: Cell<f64>,
     wallpaper: Rc<RefCell<Option<cairo::ImageSurface>>>,
     /// Which file `wallpaper` was decoded from.
     wallpaper_path: Rc<RefCell<String>>,
+    /// Redrawn when a new wallpaper finishes decoding.
+    background: RefCell<Option<gtk::DrawingArea>>,
     uptime: gtk::Label,
 }
 
 impl Power {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
-        let window = gtk::ApplicationWindow::builder().application(app).css_classes(["eclipse-shell"]).build();
-        window.init_layer_shell();
-        window.set_namespace(Some(NAMESPACE));
-        window.set_layer(Layer::Overlay);
-        window.set_keyboard_mode(KeyboardMode::Exclusive);
-        for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
-            window.set_anchor(edge, true);
-        }
-        window.set_exclusive_zone(-1);
-
-        // A click anywhere off the card closes the menu.
-        let catcher = gtk::DrawingArea::new();
-        let card = gtk::Overlay::builder().halign(gtk::Align::End).valign(gtk::Align::Start).build();
-        let layers = gtk::Overlay::new();
-        layers.set_child(Some(&catcher));
-        layers.add_overlay(&card);
-        window.set_child(Some(&layers));
-
         let power = Rc::new(Self {
-            window,
-            card,
-            openness: Tween::shared(OPEN_MS, MORPH),
-            open: Cell::new(false),
-            monitor: RefCell::default(),
+            popout: Popout::new(app, NAMESPACE),
             built_for: Cell::new(0.0),
-            top: Cell::new(0.0),
             wallpaper: Rc::default(),
             wallpaper_path: Rc::default(),
+            background: RefCell::default(),
             uptime: gtk::Label::new(None),
         });
-
-        let click = gtk::GestureClick::new();
-        click.connect_released({
-            let power = Rc::downgrade(&power);
-            move |_, _, _, _| power.upgrade().into_iter().for_each(|p| p.hide())
-        });
-        catcher.add_controller(click);
-
-        let keys = gtk::EventControllerKey::new();
-        keys.connect_key_pressed({
-            let power = Rc::downgrade(&power);
-            move |_, key, _, _| {
-                if key != gdk::Key::Escape {
-                    return glib::Propagation::Proceed;
-                }
-                power.upgrade().into_iter().for_each(|p| p.hide());
-                glib::Propagation::Stop
-            }
-        });
-        power.window.add_controller(keys);
         power.load_wallpaper();
         power
     }
 
     pub fn set_monitor(&self, monitor: Option<gdk::Monitor>) {
-        *self.monitor.borrow_mut() = monitor;
+        self.popout.set_monitor(monitor);
     }
 
     pub fn toggle(self: &Rc<Self>) {
-        if self.open.get() { self.hide() } else { self.show() }
-    }
-
-    fn show(self: &Rc<Self>) {
-        let monitor = self.monitor.borrow().clone();
-        let height = monitor.as_ref().map_or(1080, |m| m.geometry().height());
-        let s = config::bar_scale(height);
-        self.window.set_monitor(monitor.as_ref());
+        if self.popout.is_open() {
+            return self.popout.hide();
+        }
+        let s = self.popout.scale();
         if self.built_for.get() != s {
             self.build(s);
             self.built_for.set(s);
         }
-        self.top.set(config::FRAME_EDGE + config::BAR_HEIGHT * s + 6.0 * s);
-        self.card.set_margin_end((config::FRAME_EDGE + 12.0 * s).round() as i32);
         self.uptime.set_text(&format!("UP {}", uptime_text()));
         self.load_wallpaper();
-
-        self.open.set(true);
-        self.window.present();
-        self.animate(1.0);
+        self.popout.show(Anchor::Right);
     }
 
-    fn hide(self: &Rc<Self>) {
-        if self.open.replace(false) {
-            self.animate(0.0);
-        }
-    }
-
-    /// Fades the card in while it drops a few pixels into place.
-    fn animate(self: &Rc<Self>, target: f64) {
-        let power = Rc::downgrade(self);
-        anim::animate_to(&self.card, &self.openness, target, move |card, t| {
-            let Some(power) = power.upgrade() else { return };
-            let eased = Easing::OutCubic.apply(t);
-            card.set_opacity(eased);
-            card.set_margin_top((power.top.get() - 8.0 * (1.0 - eased)).round() as i32);
-            if t <= 0.0 && !power.open.get() {
-                power.window.set_visible(false);
-            }
-        });
+    fn hide(&self) {
+        let popout = self.popout.clone();
+        popout.hide();
     }
 
     /// Loads the current wallpaper for the hero, unless it is already loaded.
@@ -198,7 +126,7 @@ impl Power {
     /// shows it, so a large wallpaper never holds up opening the menu.
     fn load_wallpaper(&self) {
         let (wallpaper, loaded) = (self.wallpaper.clone(), self.wallpaper_path.clone());
-        let card = self.card.downgrade();
+        let background = self.background.borrow().as_ref().map(|b| b.downgrade());
         glib::spawn_future_local(async move {
             let Some(path) = current_wallpaper().await else { return };
             if *loaded.borrow() == path {
@@ -213,8 +141,7 @@ impl Power {
             let Ok(surface) = cairo::ImageSurface::create_for_data(pixels, cairo::Format::ARgb32, w, h, w * 4) else { return };
             *wallpaper.borrow_mut() = Some(surface);
             *loaded.borrow_mut() = path;
-            // The card's background is the first drawing under its content.
-            if let Some(background) = card.upgrade().and_then(|c| c.child()).and_then(|c| c.first_child()) {
+            if let Some(background) = background.and_then(|b| b.upgrade()) {
                 background.queue_draw();
             }
         });
@@ -262,7 +189,8 @@ impl Power {
         let content = gtk::Overlay::new();
         content.set_child(Some(&background));
         content.add_overlay(&strip);
-        self.card.set_child(Some(&content));
+        self.popout.set_content(&content);
+        *self.background.borrow_mut() = Some(background);
     }
 
     /// One action tile: an outlined rounded square holding a glyph over a
