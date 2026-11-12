@@ -15,6 +15,7 @@ mod theme;
 mod tray;
 mod usage_popout;
 mod weather;
+mod window_popout;
 
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
@@ -30,6 +31,7 @@ use hyprland::State;
 use launcher::Launcher;
 use power::Power;
 use usage_popout::UsagePopout;
+use window_popout::WindowPopout;
 
 /// GTK windows paint a theme background by default; this is the one rule
 /// needed to let the drawn surfaces show through.
@@ -43,9 +45,16 @@ struct Shell {
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
     battery: Rc<BatteryPopout>,
+    window: Rc<WindowPopout>,
 }
 
 impl Shell {
+    /// The bar on the focused monitor, or any bar.
+    fn focused_bar(&self) -> Option<&Bar> {
+        let focused = self.state.focused_monitor.as_deref();
+        self.bars.iter().find(|b| b.connector.as_deref() == focused).or(self.bars.first())
+    }
+
     fn refresh(&self, display: &gdk::Display) {
         for bar in &self.bars {
             bar.update(&self.state);
@@ -55,7 +64,8 @@ impl Shell {
         self.power.set_monitor(focused.clone());
         self.calendar.set_monitor(focused.clone());
         self.usage.set_monitor(focused.clone());
-        self.battery.set_monitor(focused);
+        self.battery.set_monitor(focused.clone());
+        self.window.set_monitor(focused);
     }
 }
 
@@ -78,13 +88,14 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         bar.destroy();
     }
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
-    let battery = shell_ref.battery.clone();
+    let (battery, window) = (shell_ref.battery.clone(), shell_ref.window.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
         power: Rc::new(move || power.toggle()),
         calendar: Rc::new(move |x| calendar.toggle(x)),
         usage: Rc::new(move |x| usage.toggle(x)),
         battery: Rc::new(move |x| battery.toggle(x)),
+        window: Rc::new(move |x| window.toggle(x)),
     });
     let monitors = display.monitors();
     shell_ref.bars = (0..monitors.n_items())
@@ -101,6 +112,7 @@ struct Surfaces {
     calendar: Rc<Calendar>,
     usage: Rc<UsagePopout>,
     battery: Rc<BatteryPopout>,
+    window: Rc<WindowPopout>,
     shell: Rc<RefCell<Shell>>,
 }
 
@@ -129,7 +141,8 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let calendar = Calendar::new(app);
     let usage = UsagePopout::new(app);
     let battery = BatteryPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), battery: battery.clone() }));
+    let window = WindowPopout::new(app);
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), battery: battery.clone(), window: window.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -149,7 +162,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, battery, shell })
+    Some(Surfaces { launcher, power, calendar, usage, battery, window, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -186,8 +199,7 @@ fn main() -> glib::ExitCode {
                 if let Some(surfaces) = surfaces.get() {
                     // Under the focused monitor's clock, as a click on it would.
                     let shell = surfaces.shell.borrow();
-                    let focused = shell.state.focused_monitor.as_deref();
-                    let bar = shell.bars.iter().find(|b| b.connector.as_deref() == focused).or(shell.bars.first());
+                    let bar = shell.focused_bar();
                     match bar.and_then(Bar::clock_x) {
                         Some(x) => surfaces.calendar.toggle(x),
                         None => surfaces.calendar.toggle_centred(),
@@ -197,8 +209,7 @@ fn main() -> glib::ExitCode {
             Some("toggle-usage") => {
                 if let Some(surfaces) = surfaces.get() {
                     let shell = surfaces.shell.borrow();
-                    let focused = shell.state.focused_monitor.as_deref();
-                    let bar = shell.bars.iter().find(|b| b.connector.as_deref() == focused).or(shell.bars.first());
+                    let bar = shell.focused_bar();
                     if let Some(x) = bar.and_then(Bar::usage_x) {
                         surfaces.usage.toggle(x);
                     }
@@ -207,10 +218,18 @@ fn main() -> glib::ExitCode {
             Some("toggle-battery") => {
                 if let Some(surfaces) = surfaces.get() {
                     let shell = surfaces.shell.borrow();
-                    let focused = shell.state.focused_monitor.as_deref();
-                    let bar = shell.bars.iter().find(|b| b.connector.as_deref() == focused).or(shell.bars.first());
+                    let bar = shell.focused_bar();
                     if let Some(x) = bar.and_then(Bar::battery_x) {
                         surfaces.battery.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-window") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    let bar = shell.focused_bar();
+                    if let Some(x) = bar.and_then(Bar::title_x) {
+                        surfaces.window.toggle(x);
                     }
                 }
             }

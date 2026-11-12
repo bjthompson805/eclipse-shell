@@ -42,6 +42,7 @@ pub struct Actions {
     pub calendar: Rc<dyn Fn(f64)>,
     pub usage: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
+    pub window: Rc<dyn Fn(f64)>,
 }
 
 pub struct Bar {
@@ -121,6 +122,11 @@ impl Bar {
     /// Where the clock's centre sits, in logical px from the monitor's left.
     pub fn clock_x(&self) -> Option<f64> {
         centre_x(&self.clock)
+    }
+
+    /// Where the window title's centre sits.
+    pub fn title_x(&self) -> Option<f64> {
+        centre_x(self.title.widget.upcast_ref())
     }
 
     /// Where the battery's centre sits, if the bar shows it.
@@ -249,6 +255,17 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         usage.widget.upcast::<gtk::Widget>()
     });
     left.append(&title.widget);
+    title.widget.set_cursor_from_name(Some("pointer"));
+    let click = gtk::GestureClick::new();
+    click.connect_released({
+        let actions = actions.clone();
+        move |gesture, _, _, _| {
+            if let Some(x) = gesture.widget().and_then(|w| centre_x(&w)) {
+                (actions.window)(x);
+            }
+        }
+    });
+    title.widget.add_controller(click);
 
     let clock = Module::new(&clock::clock(s), pill(13.0 * s));
     clock.connect_tapped({
