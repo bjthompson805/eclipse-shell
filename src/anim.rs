@@ -72,6 +72,11 @@ impl Tween {
         tween
     }
 
+    /// Sets the length of the next animation.
+    pub fn set_duration(&mut self, duration_ms: f64) {
+        self.duration_ms = duration_ms;
+    }
+
     pub fn target(&self) -> f64 {
         self.target
     }

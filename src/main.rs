@@ -84,7 +84,8 @@ use workspaces_popout::WorkspacesPopout;
 
 /// GTK windows paint a theme background by default; this is the one rule
 /// needed to let the drawn surfaces show through.
-pub(crate) const TRANSPARENT_WINDOW: &str = "window.eclipse-shell { background: transparent; }";
+pub(crate) const TRANSPARENT_WINDOW: &str = "window.eclipse-shell { background: transparent; }
+window.eclipse-shell scrolledwindow.curtain undershoot, window.eclipse-shell scrolledwindow.curtain overshoot { background: none; }";
 
 struct Shell {
     bars: Vec<Bar>,

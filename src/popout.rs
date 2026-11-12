@@ -1,6 +1,9 @@
 //! A popout: a card dropping from the bar on its own full-screen overlay
-//! surface. A click off the card or Escape closes it. Opening fades the card
-//! in while it drops a few pixels into place.
+//! surface. A click off the card or Escape closes it. As in Ryoku, the card
+//! is part of the frame: it hangs from the bar, flaring into it, with the
+//! frame's edge line running round it, and opens by growing down out of the
+//! bar on a springy curve. A clip grows over the content, which keeps its full
+//! size, and the content fades in over the first quarter.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -10,12 +13,18 @@ use gtk::{gdk, glib};
 use gtk4 as gtk;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::anim::{self, Easing, MORPH, Tween};
+use crate::anim::{self, Easing, Tween};
 use crate::theme::{self, DIM, TextStyle};
-use crate::{config, hint, mark};
+use crate::{config, hint, hyprland, mark};
 
-const OPEN_MS: f64 = 260.0;
-const DROP: f64 = 8.0;
+const OPEN_MS: f64 = 500.0;
+const CLOSE_MS: f64 = 420.0;
+/// Ryoku's spatial curve; its overshoot is clipped to the content's height,
+/// so it reads as a quick reveal that eases into place.
+const SPATIAL: Easing = Easing::Bezier(0.38, 1.21, 0.22, 1.0);
+const LINEAR: Easing = Easing::Bezier(0.0, 0.0, 1.0, 1.0);
+/// Radius of the concave corners where the card flares into the bar.
+const FLARE: f64 = config::FRAME_RADIUS;
 
 /// Where the card sits along the bar.
 #[derive(Clone, Copy)]
@@ -29,7 +38,12 @@ pub enum Anchor {
 
 pub struct Popout {
     window: gtk::ApplicationWindow,
-    card: gtk::Box,
+    card: gtk::Overlay,
+    /// The card's distance below its own top to the bar's edge line, shared
+    /// with its drawing.
+    seam: Rc<Cell<f64>>,
+    /// Clips the content during the reveal; holds it once open.
+    curtain: gtk::ScrolledWindow,
     /// Hover hints float here, over the card.
     hints: gtk::Fixed,
     openness: Rc<RefCell<Tween>>,
@@ -52,9 +66,20 @@ impl Popout {
             window.set_anchor(edge, true);
         }
         window.set_exclusive_zone(-1);
+        // The popout animates itself; Hyprland's own layer animations would
+        // pop it open and leave a ghost fading out after it closes.
+        let namespace = namespace.to_owned();
+        hyprland::keep(move || hyprland::eval(&format!("hl.layer_rule({{ name = \"{namespace}-noanim\", match = {{ namespace = \"{namespace}\" }}, no_anim = true }})")));
 
         let catcher = gtk::DrawingArea::new();
-        let card = gtk::Box::builder().valign(gtk::Align::Start).build();
+        let seam = Rc::new(Cell::new(0.0));
+        let card = gtk::Overlay::builder().valign(gtk::Align::Start).build();
+        card.set_child(Some(&body(seam.clone())));
+        let curtain = curtain();
+        curtain.set_margin_start(FLARE as i32);
+        curtain.set_margin_end(FLARE as i32);
+        card.add_overlay(&curtain);
+        card.set_measure_overlay(&curtain, true);
         let layers = gtk::Overlay::new();
         layers.set_child(Some(&catcher));
         layers.add_overlay(&card);
@@ -62,7 +87,7 @@ impl Popout {
         layers.add_overlay(&hints);
         window.set_child(Some(&layers));
 
-        let popout = Rc::new(Self { window, card, hints, openness: Tween::closed(OPEN_MS, MORPH), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0), pane: None });
+        let popout = Rc::new(Self { window, card, seam, curtain, hints, openness: Tween::closed(OPEN_MS, LINEAR), open: Cell::new(false), monitor: RefCell::default(), top: Cell::new(0.0), pane: None });
 
         let click = gtk::GestureClick::new();
         click.connect_released({
@@ -94,9 +119,11 @@ impl Popout {
         let window = gtk::ApplicationWindow::builder().application(app).build();
         Rc::new(Self {
             window,
-            card: gtk::Box::new(gtk::Orientation::Vertical, 0),
+            card: gtk::Overlay::new(),
+            seam: Rc::default(),
+            curtain: curtain(),
             hints: hints.clone(),
-            openness: Tween::closed(OPEN_MS, MORPH),
+            openness: Tween::closed(OPEN_MS, LINEAR),
             open: Cell::new(false),
             monitor: RefCell::default(),
             top: Cell::new(0.0),
@@ -143,11 +170,15 @@ impl Popout {
     }
 
     pub fn set_content(&self, content: &impl IsA<gtk::Widget>) {
-        let target = self.pane.as_ref().map_or(&self.card, |(holder, _)| holder);
-        while let Some(child) = target.first_child() {
-            target.remove(&child);
+        match &self.pane {
+            Some((holder, _)) => {
+                while let Some(child) = holder.first_child() {
+                    holder.remove(&child);
+                }
+                holder.append(content);
+            }
+            None => self.curtain.set_child(Some(content)),
         }
-        target.append(content);
     }
 
     pub fn show(self: &Rc<Self>, anchor: Anchor) {
@@ -158,9 +189,15 @@ impl Popout {
         let monitor = self.monitor.borrow().clone();
         let s = self.scale();
         self.window.set_monitor(monitor.as_ref());
-        self.top.set(config::FRAME_EDGE + config::BAR_HEIGHT * s + 6.0 * s);
+        // The card starts a little above the bar's edge line so it covers it.
+        let line = config::FRAME_EDGE + config::BAR_HEIGHT * s;
+        let top = (line - 2.0).floor();
+        self.top.set(top);
+        self.seam.set(line - top);
+        self.curtain.set_margin_top((line - top).ceil() as i32);
 
-        let inset = config::FRAME_EDGE + 12.0 * s;
+        // The flares stick out past the body, which keeps this far in.
+        let inset = config::FRAME_EDGE + 12.0 * s - FLARE;
         match anchor {
             Anchor::Right => {
                 self.card.set_halign(gtk::Align::End);
@@ -182,8 +219,24 @@ impl Popout {
         }
 
         self.open.set(true);
+        if self.window.is_visible() {
+            return self.animate(1.0);
+        }
+        // A window that's only now appearing takes a few frames to reach the
+        // screen; start growing once it's there, or the start is lost.
+        self.frame(0.0);
         self.window.present();
-        self.animate(1.0);
+        let popout = Rc::downgrade(self);
+        let frames = Cell::new(0);
+        self.window.add_tick_callback(move |window, _| {
+            if !window.is_mapped() || frames.replace(frames.get() + 1) < 2 {
+                return glib::ControlFlow::Continue;
+            }
+            if let Some(p) = popout.upgrade().filter(|p| p.open.get()) {
+                p.animate(1.0);
+            }
+            glib::ControlFlow::Break
+        });
     }
 
     pub fn hide(self: &Rc<Self>) {
@@ -200,19 +253,83 @@ impl Popout {
     }
 
     fn animate(self: &Rc<Self>, target: f64) {
+        self.openness.borrow_mut().set_duration(if target > 0.0 { OPEN_MS } else { CLOSE_MS });
         let popout = Rc::downgrade(self);
-        anim::animate_to(&self.card, &self.openness, target, move |card, t| {
-            let Some(popout) = popout.upgrade() else {
-                return;
-            };
-            let eased = Easing::OutCubic.apply(t);
-            card.set_opacity(eased);
-            card.set_margin_top((popout.top.get() - DROP * (1.0 - eased)).round() as i32);
-            if t <= 0.0 && !popout.open.get() {
-                popout.window.set_visible(false);
+        anim::animate_to(&self.card, &self.openness, target, move |_, t| {
+            if let Some(popout) = popout.upgrade() {
+                popout.frame(t);
             }
         });
     }
+
+    /// Draws the card `t` of the way open.
+    fn frame(&self, t: f64) {
+        // Opening springs out; closing retracts on a plain ease-out.
+        let opening = self.openness.borrow().target() > 0.0;
+        let reveal = if opening { SPATIAL.apply(t) } else { 1.0 - Easing::OutCubic.apply(1.0 - t) };
+        let curtain = &self.curtain;
+        curtain.set_opacity((reveal / 0.25).clamp(0.0, 1.0));
+        self.card.set_margin_top(self.top.get().round() as i32);
+        if t >= 1.0 {
+            curtain.set_max_content_height(-1);
+        } else {
+            let width = curtain.width().max(curtain.measure(gtk::Orientation::Horizontal, -1).1);
+            let full = curtain.child().map_or(0, |c| c.measure(gtk::Orientation::Vertical, width).1);
+            curtain.set_max_content_height((f64::from(full) * reveal.min(1.0)).round().max(1.0) as i32);
+            curtain.vadjustment().set_value(0.0);
+        }
+        if t <= 0.0 && !self.open.get() {
+            self.window.set_visible(false);
+        }
+    }
+}
+
+/// The card's surface, joined to the bar: square where it meets the bar's
+/// edge line `seam` down, flaring into it, rounded at the bottom, and edged
+/// like the frame on every side but the top.
+fn body(seam: Rc<Cell<f64>>) -> gtk::DrawingArea {
+    let area = gtk::DrawingArea::new();
+    area.set_draw_func(move |_, cr, w, h| {
+        use std::f64::consts::PI;
+        let palette = theme::palette();
+        let (w, h, y0) = (f64::from(w), f64::from(h), seam.get());
+        let depth = (h - y0).max(0.0);
+        // Both shrink while the card is barely open.
+        let flare = FLARE.min(depth / 2.0);
+        let r = config::LAUNCHER_RADIUS.min(depth / 2.0).min((w - 2.0 * FLARE) / 2.0).max(0.0);
+        let (left, right) = (FLARE, w - FLARE);
+        // Arcs join on from the current point, if there is one.
+        let outline = |cr: &gtk::cairo::Context| {
+            cr.arc_negative(right + flare, y0 + flare, flare, -PI / 2.0, PI);
+            cr.arc(right - r, h - r, r, 0.0, PI / 2.0);
+            cr.arc(left + r, h - r, r, PI / 2.0, PI);
+            cr.arc_negative(left - flare, y0 + flare, flare, 0.0, -PI / 2.0);
+        };
+        cr.move_to(left - flare, 0.0);
+        cr.line_to(right + flare, 0.0);
+        outline(cr);
+        cr.close_path();
+        theme::set_source(cr, palette.base);
+        let _ = cr.fill();
+        cr.new_path();
+        outline(cr);
+        cr.set_line_width(config::FRAME_BORDER_WIDTH);
+        theme::set_source(cr, palette.edge);
+        let _ = cr.stroke();
+    });
+    area
+}
+
+/// A clip that can be shorter than its content: no scrollbar, height 0 at
+/// least, and its content's natural size when not held shorter.
+fn curtain() -> gtk::ScrolledWindow {
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::External)
+        .propagate_natural_width(true)
+        .propagate_natural_height(true)
+        .css_classes(["curtain"])
+        .build()
 }
 
 /// A section label: a short accent rule, the mark, and spaced-out caps.
@@ -240,18 +357,28 @@ pub fn card(content: &impl IsA<gtk::Widget>) -> gtk::Overlay {
 /// [`card`], washed from its top-left corner with `tint` while it has one.
 pub fn tinted_card(content: &impl IsA<gtk::Widget>, tint: Rc<Cell<Option<theme::Rgba>>>) -> gtk::Overlay {
     let surface = gtk::DrawingArea::new();
-    surface.set_draw_func(move |_, cr, w, h| {
+    surface.set_draw_func(move |area, cr, w, h| {
         let palette = theme::palette();
         let (w, h) = (f64::from(w), f64::from(h));
-        theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, config::LAUNCHER_RADIUS);
-        theme::set_source(cr, palette.base);
-        let _ = cr.fill_preserve();
+        // In a popout, the popout's body is the card; only the wash is left.
+        let hung = area.ancestor(gtk::ScrolledWindow::static_type()).is_some_and(|a| a.has_css_class("curtain"));
+        if hung {
+            cr.rectangle(0.0, 0.0, w, h);
+        } else {
+            theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, config::LAUNCHER_RADIUS);
+            theme::set_source(cr, palette.base);
+            let _ = cr.fill_preserve();
+        }
         if let Some(c) = tint.get() {
             let wash = gtk::cairo::RadialGradient::new(0.0, 0.0, 0.0, 0.0, 0.0, w.max(h));
             wash.add_color_stop_rgba(0.0, c.r, c.g, c.b, 0.22);
             wash.add_color_stop_rgba(1.0, c.r, c.g, c.b, 0.0);
             let _ = cr.set_source(&wash);
             let _ = cr.fill_preserve();
+        }
+        if hung {
+            cr.new_path();
+            return;
         }
         cr.set_line_width(1.0);
         theme::set_source(cr, palette.outline);
