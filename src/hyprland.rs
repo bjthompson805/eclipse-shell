@@ -7,6 +7,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use gtk4::glib;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -232,6 +233,42 @@ pub fn exit() {
     command("exiting", "dispatch hl.dsp.exit()");
 }
 
+static RELOADED: std::sync::OnceLock<async_channel::Sender<()>> = std::sync::OnceLock::new();
+
+thread_local! {
+    static RELOAD_LISTENERS: std::cell::RefCell<Vec<Box<dyn Fn()>>> = std::cell::RefCell::default();
+    /// The blur size the current holds asked for, to put back after a reload.
+    static HELD_BLUR: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+
+/// Runs `f` now and again after every config reload. For runtime settings
+/// made with [`eval`], which a reload drops.
+pub fn keep(f: impl Fn() + 'static) {
+    f();
+    on_reload(f);
+}
+
+fn on_reload(f: impl Fn() + 'static) {
+    RELOAD_LISTENERS.with(|l| l.borrow_mut().push(Box::new(f)));
+    if RELOADED.get().is_none() {
+        let (tx, rx) = async_channel::unbounded();
+        let _ = RELOADED.set(tx);
+        glib::spawn_future_local(async move {
+            while rx.recv().await.is_ok() {
+                RELOAD_LISTENERS.with(|l| l.borrow().iter().for_each(|f| f()));
+            }
+        });
+        // A reload drops a held blur too.
+        RELOAD_LISTENERS.with(|l| {
+            l.borrow_mut().push(Box::new(|| {
+                if BLUR_HOLDS.with(|h| h.borrow().0) > 0 {
+                    set_blur(true, HELD_BLUR.with(std::cell::Cell::get));
+                }
+            }))
+        });
+    }
+}
+
 thread_local! {
     /// How many surfaces are holding blur on, and the settings from before
     /// the first did.
@@ -253,6 +290,7 @@ pub fn hold_blur(size: i64) {
         }
         h.0 += 1;
     });
+    HELD_BLUR.with(|b| b.set(size));
     set_blur(true, size);
 }
 
@@ -357,6 +395,11 @@ pub fn watch() -> async_channel::Receiver<State> {
                 Ok(_) => {
                     // Events look like "name>>data"; v2 variants share the prefix.
                     let name = line.split(">>").next().unwrap_or_default();
+                    if name == "configreloaded" {
+                        if let Some(tx) = RELOADED.get() {
+                            let _ = tx.try_send(());
+                        }
+                    }
                     if REFRESH_EVENTS.iter().any(|e| name.starts_with(e)) && !pending {
                         pending = true;
                         if let Ok(s) = &timeout_handle {

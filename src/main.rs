@@ -39,6 +39,7 @@ mod toasts;
 mod tray;
 mod usage_popout;
 mod wallpaper;
+mod wallpaper_switcher;
 mod weather;
 mod weather_popout;
 mod wifi;
@@ -66,6 +67,7 @@ use mixer_popout::MixerPopout;
 use network_popout::NetworkPopout;
 use osd::Osd;
 use profile::Profile;
+use wallpaper_switcher::WallpaperSwitcher;
 use controls::Controls;
 use overview::Overview;
 use power::Power;
@@ -103,6 +105,7 @@ struct Shell {
     osd: Rc<Osd>,
     profile: Rc<Profile>,
     controls: Rc<Controls>,
+    wallpapers: Rc<WallpaperSwitcher>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -139,6 +142,7 @@ impl Shell {
         self.osd.set_monitor(focused.clone());
         self.profile.sidebar().set_monitor(focused.clone());
         self.controls.sidebar().set_monitor(focused.clone());
+        self.wallpapers.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -220,6 +224,7 @@ struct Surfaces {
     osd: Rc<Osd>,
     profile: Rc<Profile>,
     controls: Rc<Controls>,
+    wallpapers: Rc<WallpaperSwitcher>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -250,7 +255,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     sysstats::start();
     capture::start();
     traffic::start();
-    display_popout::restore();
+    hyprland::keep(display_popout::restore);
     bluetooth::start();
 
     let launcher = Launcher::new(app);
@@ -272,10 +277,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let osd = Osd::new(app);
     let profile = Profile::new(app);
     let controls = Controls::new(app);
+    let wallpapers = WallpaperSwitcher::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), osd: osd.clone(), profile: profile.clone(), controls: controls.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), osd: osd.clone(), profile: profile.clone(), controls: controls.clone(), wallpapers: wallpapers.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -295,7 +301,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, osd, profile, controls, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, osd, profile, controls, wallpapers, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -480,6 +486,12 @@ fn main() -> glib::ExitCode {
                     surfaces.controls.sidebar().toggle();
                 }
             }
+            Some("toggle-wallpapers") => {
+                if let Some(surfaces) = surfaces.get() {
+                    surfaces.wallpapers.toggle();
+                }
+            }
+            Some("wallpaper-next") => wallpaper::next(),
             Some("toggle-power") => {
                 if let Some(surfaces) = surfaces.get() {
                     surfaces.power.toggle();

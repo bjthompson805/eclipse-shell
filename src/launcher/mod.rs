@@ -84,9 +84,11 @@ impl Launcher {
         layers.add_overlay(&stage);
         window.set_child(Some(&layers));
 
-        hyprland::eval(&format!(
-            "hl.layer_rule({{ name = \"{NAMESPACE}-blur\", match = {{ namespace = \"{NAMESPACE}\" }}, blur = true, no_anim = true }})"
-        ));
+        hyprland::keep(|| {
+            hyprland::eval(&format!(
+                "hl.layer_rule({{ name = \"{NAMESPACE}-blur\", match = {{ namespace = \"{NAMESPACE}\" }}, blur = true, no_anim = true }})"
+            ))
+        });
 
         let launcher = Rc::new(Self {
             window,

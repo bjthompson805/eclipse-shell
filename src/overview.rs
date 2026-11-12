@@ -86,7 +86,7 @@ impl Overview {
             window.set_anchor(edge, true);
         }
         window.set_exclusive_zone(-1);
-        hyprland::eval(&format!("hl.layer_rule({{ name = \"{NAMESPACE}-blur\", match = {{ namespace = \"{NAMESPACE}\" }}, blur = true, no_anim = true }})"));
+        hyprland::keep(|| hyprland::eval(&format!("hl.layer_rule({{ name = \"{NAMESPACE}-blur\", match = {{ namespace = \"{NAMESPACE}\" }}, blur = true, no_anim = true }})")));
 
         let backdrop = gtk::DrawingArea::new();
         backdrop.set_draw_func(|_, cr, _, _| {
