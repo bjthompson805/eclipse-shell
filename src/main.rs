@@ -7,6 +7,8 @@ mod bluetooth;
 mod bluetooth_popout;
 mod calendar;
 mod capture;
+mod clipboard;
+mod clipboard_popout;
 mod config;
 mod display_popout;
 mod fader;
@@ -50,6 +52,7 @@ use bar::{Actions, Bar};
 use battery_popout::BatteryPopout;
 use bluetooth_popout::BluetoothPopout;
 use calendar::Calendar;
+use clipboard_popout::ClipboardPopout;
 use display_popout::DisplayPopout;
 use hyprland::State;
 use inbox_popout::InboxPopout;
@@ -89,6 +92,7 @@ struct Shell {
     overview: Rc<Overview>,
     toasts: Rc<Toasts>,
     inbox: Rc<InboxPopout>,
+    clipboard: Rc<ClipboardPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -121,6 +125,7 @@ impl Shell {
         self.overview.set_monitor(focused.clone());
         self.toasts.set_monitor(focused.clone());
         self.inbox.set_monitor(focused.clone());
+        self.clipboard.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -193,6 +198,7 @@ struct Surfaces {
     workspaces: Rc<WorkspacesPopout>,
     overview: Rc<Overview>,
     inbox: Rc<InboxPopout>,
+    clipboard: Rc<ClipboardPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -217,6 +223,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     weather::start();
     tray::start();
     notifications::start();
+    clipboard::start();
     media::start();
     agent_usage::start();
     sysstats::start();
@@ -240,10 +247,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let overview = Overview::new(app);
     let toasts = Toasts::new(app);
     let inbox = InboxPopout::new(app);
+    let clipboard = ClipboardPopout::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -263,7 +271,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -391,6 +399,11 @@ fn main() -> glib::ExitCode {
                     if let Some(x) = shell.focused_bar().and_then(Bar::bell_x) {
                         surfaces.inbox.toggle(x);
                     }
+                }
+            }
+            Some("toggle-clipboard") => {
+                if let Some(surfaces) = surfaces.get() {
+                    surfaces.clipboard.toggle();
                 }
             }
             Some("toggle-battery") => {
