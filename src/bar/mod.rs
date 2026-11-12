@@ -6,6 +6,7 @@
 //! reserves the band's height so tiled windows sit below it.
 
 mod agent_usage;
+mod bell;
 mod clock;
 mod media;
 mod module;
@@ -50,6 +51,7 @@ pub struct Actions {
     pub weather: Rc<dyn Fn(f64)>,
     pub traffic: Rc<dyn Fn(f64)>,
     pub workspaces: Rc<dyn Fn(f64)>,
+    pub inbox: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
@@ -67,6 +69,7 @@ struct Anchors {
     media: Option<gtk::Widget>,
     weather: Option<gtk::Widget>,
     traffic: Option<gtk::Widget>,
+    bell: Option<gtk::Widget>,
     battery: Option<gtk::Widget>,
 }
 
@@ -199,6 +202,11 @@ impl Bar {
     /// Where the workspace pills' centre sits.
     pub fn workspaces_x(&self) -> Option<f64> {
         centre_x(self.workspaces.widget.upcast_ref())
+    }
+
+    /// Where the notification bell's centre sits.
+    pub fn bell_x(&self) -> Option<f64> {
+        centre_x(self.anchors.bell.as_ref()?)
     }
 
     /// Where the battery's centre sits, if the bar shows it.
@@ -462,6 +470,17 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         icons.bind_property("visible", &tray.widget, "visible").sync_create().build();
         right.append(&tray.widget);
     }
+    let bell = Module::new(&bell::bell(s), pill(10.0 * s));
+    bell.connect_tapped({
+        let (actions, pill) = (actions.clone(), bell.widget.downgrade());
+        move || {
+            if let Some(x) = pill.upgrade().and_then(|p| centre_x(p.upcast_ref())) {
+                (actions.inbox)(x);
+            }
+        }
+    });
+    anchors.bell = Some(bell.widget.clone().upcast());
+    right.append(&bell.widget);
     right.append(&power.widget);
 
     // The sides sit at the edges; the clock floats above them at the centre,
