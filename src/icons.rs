@@ -47,7 +47,10 @@ fn from_desktop_entry(class: &str) -> Option<gio::Icon> {
         let desktop = app.downcast_ref::<gio_unix::DesktopAppInfo>()?;
         let claims = desktop.startup_wm_class().is_some_and(|wm| wm.to_lowercase() == lower);
         let id_matches = app.id().is_some_and(|id| id.trim_end_matches(".desktop").to_lowercase() == lower);
-        let exe_matches = app.executable().file_name().is_some_and(|exe| exe.to_string_lossy().to_lowercase() == lower);
+        // Not executable(): gio-rs maps it to a PathBuf, but it's NULL for
+        // some entries and converting that segfaults.
+        let exe = app.commandline().and_then(|c| c.to_string_lossy().split_whitespace().next().map(String::from));
+        let exe_matches = exe.is_some_and(|exe| exe.rsplit('/').next().unwrap_or(&exe).to_lowercase() == lower);
         (claims || id_matches || exe_matches).then(|| app.icon()).flatten()
     })
 }
