@@ -7,6 +7,7 @@ mod bluetooth;
 mod bluetooth_popout;
 mod calendar;
 mod capture;
+mod chrome;
 mod clipboard;
 mod clipboard_popout;
 mod controls;
@@ -41,6 +42,7 @@ mod tray;
 mod usage_popout;
 mod wallpaper;
 mod wallpaper_switcher;
+mod walls;
 mod weather;
 mod weather_popout;
 mod wifi;
@@ -82,7 +84,7 @@ use workspaces_popout::WorkspacesPopout;
 
 /// GTK windows paint a theme background by default; this is the one rule
 /// needed to let the drawn surfaces show through.
-const TRANSPARENT_WINDOW: &str = "window.eclipse-shell { background: transparent; }";
+pub(crate) const TRANSPARENT_WINDOW: &str = "window.eclipse-shell { background: transparent; }";
 
 struct Shell {
     bars: Vec<Bar>,
@@ -312,6 +314,10 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
 fn main() -> glib::ExitCode {
     // The live wallpaper runs as a process of its own, without GTK.
     let args: Vec<String> = std::env::args().collect();
+    // The wallpaper browser is an app of its own.
+    if args.get(1).map(String::as_str) == Some("walls") {
+        return walls::run();
+    }
     if args.get(1).map(String::as_str) == Some("livewall") {
         let Some(clip) = args.get(2) else {
             eprintln!("usage: eclipse-shell livewall <clip>");

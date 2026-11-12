@@ -133,7 +133,7 @@ pub struct Palette {
 }
 
 impl Palette {
-    fn from_wallust(background: Rgba, color4: Rgba) -> Self {
+    pub fn from_wallust(background: Rgba, color4: Rgba) -> Self {
         let base = clamp_to_dark_band(background);
         let raised = shift_value(base, 0.05);
         let accent = readable_on(vivid(color4), raised, 3.0);

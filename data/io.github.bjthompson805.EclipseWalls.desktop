@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Walls
+GenericName=Wallpaper Browser
+Comment=Find, preview, download and tune wallpapers, live ones included
+Exec=eclipse-shell walls
+Icon=preferences-desktop-wallpaper
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=wallpaper;background;wallhaven;live;
+StartupWMClass=io.github.bjthompson805.EclipseWalls

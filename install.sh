@@ -63,6 +63,9 @@ fi
 
 say "building eclipse-shell"
 cargo install --quiet --path "$repo" --root "$HOME/.local"
+# The wallpaper browser, for the launcher.
+mkdir -p "$HOME/.local/share/applications"
+cp "$repo/data/io.github.bjthompson805.EclipseWalls.desktop" "$HOME/.local/share/applications/"
 
 # ---- root helper and boot script ---------------------------------------------
 
