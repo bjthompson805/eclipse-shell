@@ -32,11 +32,15 @@ pub struct WorkspacesPopout {
     popout: Rc<Popout>,
     /// Where windows can be dropped: each tile and its workspace.
     targets: RefCell<Vec<(i32, gtk::Widget)>>,
+    /// The workspace a carried window would land on, and the tiles to redraw
+    /// when that changes.
+    drop_hot: Rc<Cell<Option<i32>>>,
+    backs: RefCell<Vec<gtk::DrawingArea>>,
 }
 
 impl WorkspacesPopout {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
-        Rc::new(Self { popout: Popout::new(app, NAMESPACE), targets: RefCell::default() })
+        Rc::new(Self { popout: Popout::new(app, NAMESPACE), targets: RefCell::default(), drop_hot: Rc::default(), backs: RefCell::default() })
     }
 
     pub fn set_monitor(&self, monitor: Option<gdk::Monitor>) {
@@ -66,6 +70,18 @@ impl WorkspacesPopout {
         let s = self.popout.scale();
         self.popout.set_content(&popout::card(&self.body(s, &layout, &screen)));
         true
+    }
+
+    /// The workspace whose tile is under `at`, a point on the hint layer.
+    fn target_at(&self, at: &graphene::Point) -> Option<i32> {
+        self.targets.borrow().iter().find(|(_, tile)| tile.compute_bounds(self.popout.hints()).is_some_and(|b| b.contains_point(at))).map(|(id, _)| *id)
+    }
+
+    /// Lights the tile a carried window would land on.
+    fn set_drop_hot(&self, id: Option<i32>) {
+        if self.drop_hot.replace(id) != id {
+            self.backs.borrow().iter().for_each(|b| b.queue_draw());
+        }
     }
 
     fn close_after(self: &Rc<Self>, act: impl FnOnce()) {
@@ -103,6 +119,7 @@ impl WorkspacesPopout {
         let height = width * screen.height / screen.width;
 
         self.targets.borrow_mut().clear();
+        self.backs.borrow_mut().clear();
         let strip = gtk::Box::new(gtk::Orientation::Horizontal, gap.round() as i32);
         for id in ids {
             let windows: Vec<&Placed> = layout.windows.iter().filter(|w| w.workspace == id).collect();
@@ -119,18 +136,24 @@ impl WorkspacesPopout {
         let hovered = Rc::new(Cell::new(false));
         let back = gtk::DrawingArea::builder().width_request(w.round() as i32).height_request(h.round() as i32).build();
         back.set_draw_func({
-            let hovered = hovered.clone();
+            let (hovered, drop_hot) = (hovered.clone(), self.drop_hot.clone());
             move |_, cr, w, h| {
                 let palette = theme::palette();
                 let (w, h) = (f64::from(w), f64::from(h));
+                let dropping = drop_hot.get() == Some(id);
                 theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, 8.0 * s);
                 theme::set_source(cr, palette.recessed);
                 let _ = cr.fill_preserve();
-                cr.set_line_width(if active { 1.5 * s } else { 1.0 });
-                theme::set_source(cr, if active { palette.accent_lit } else if hovered.get() { palette.edge } else { palette.outline });
+                if dropping {
+                    theme::set_source(cr, palette.accent.alpha(0.2));
+                    let _ = cr.fill_preserve();
+                }
+                cr.set_line_width(if dropping { 2.5 * s } else if active { 1.5 * s } else { 1.0 });
+                theme::set_source(cr, if dropping || active { palette.accent_lit } else if hovered.get() { palette.edge } else { palette.outline });
                 let _ = cr.stroke();
             }
         });
+        self.backs.borrow_mut().push(back.clone());
         let map = gtk::Fixed::new();
         // Tiled windows first, so floating ones sit on top as they do on screen.
         let (scale_x, scale_y) = (w / screen.width, h / screen.height);
@@ -175,14 +198,19 @@ impl WorkspacesPopout {
         let hovered = Rc::new(Cell::new(false));
         let tile = gtk::DrawingArea::builder().width_request(w.round() as i32).height_request(h.round() as i32).build();
         tile.set_draw_func({
-            let hovered = hovered.clone();
+            let (hovered, drop_hot) = (hovered.clone(), self.drop_hot.clone());
             move |_, cr, w, h| {
                 let palette = theme::palette();
                 let (w, h) = (f64::from(w), f64::from(h));
+                let dropping = drop_hot.get() == Some(id);
                 theme::rounded_rect(cr, 0.75, 0.75, w - 1.5, h - 1.5, 8.0 * s);
+                if dropping {
+                    theme::set_source(cr, palette.accent.alpha(0.28));
+                    let _ = cr.fill_preserve();
+                }
                 cr.set_dash(&[4.0 * s, 4.0 * s], 0.0);
-                cr.set_line_width(1.5 * s);
-                theme::set_source(cr, if hovered.get() { palette.edge } else { palette.outline });
+                cr.set_line_width(if dropping { 2.5 * s } else { 1.5 * s });
+                theme::set_source(cr, if dropping { palette.accent_lit } else if hovered.get() { palette.edge } else { palette.outline });
                 let _ = cr.stroke();
                 cr.set_dash(&[], 0.0);
                 let arm = h.min(w) * 0.14;
@@ -191,10 +219,11 @@ impl WorkspacesPopout {
                 cr.move_to(w / 2.0, h / 2.0 - arm);
                 cr.line_to(w / 2.0, h / 2.0 + arm);
                 cr.set_line_cap(gtk::cairo::LineCap::Round);
-                theme::set_source(cr, if hovered.get() { CREAM } else { DIM });
+                theme::set_source(cr, if dropping { palette.accent_lit } else if hovered.get() { CREAM } else { DIM });
                 let _ = cr.stroke();
             }
         });
+        self.backs.borrow_mut().push(tile.clone());
         tile.set_cursor_from_name(Some("pointer"));
         on_hover(&tile, {
             let tile = tile.downgrade();
@@ -266,6 +295,7 @@ impl WorkspacesPopout {
                 if let (Some(ghost), Some(at)) = (&*dragging.borrow(), card.compute_point(p.popout.hints(), &graphene::Point::new((x0 + dx) as f32, (y0 + dy) as f32))) {
                     let half = 18.0 * s;
                     p.popout.hints().move_(ghost, f64::from(at.x()) - half, f64::from(at.y()) - half);
+                    p.set_drop_hot(p.target_at(&at));
                 }
             }
         });
@@ -280,9 +310,10 @@ impl WorkspacesPopout {
                 };
                 p.popout.hints().remove(&ghost);
                 card.set_opacity(1.0);
+                p.set_drop_hot(None);
                 let Some((x0, y0)) = gesture.start_point() else { return };
                 let Some(at) = card.compute_point(p.popout.hints(), &graphene::Point::new((x0 + dx) as f32, (y0 + dy) as f32)) else { return };
-                let target = p.targets.borrow().iter().find(|(_, tile)| tile.compute_bounds(p.popout.hints()).is_some_and(|b| b.contains_point(&at))).map(|(id, _)| *id);
+                let target = p.target_at(&at);
                 if let Some(to) = target.filter(|to| *to != from) {
                     hyprland::move_window(&address, to);
                     let p = p.clone();
