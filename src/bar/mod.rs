@@ -43,6 +43,15 @@ pub struct Actions {
     pub usage: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
+    pub resources: Rc<dyn Fn(f64)>,
+}
+
+/// Bar modules that popouts drop beneath, for opening them by command.
+#[derive(Default)]
+struct Anchors {
+    stats: Option<gtk::Widget>,
+    usage: Option<gtk::Widget>,
+    battery: Option<gtk::Widget>,
 }
 
 pub struct Bar {
@@ -51,8 +60,7 @@ pub struct Bar {
     workspaces: Rc<Workspaces>,
     title: Rc<Title>,
     clock: gtk::Widget,
-    usage: Option<gtk::Widget>,
-    battery: Option<gtk::Widget>,
+    anchors: Anchors,
 }
 
 impl Bar {
@@ -99,7 +107,7 @@ impl Bar {
 
         let workspaces = Workspaces::new(s);
         let title = Title::new(s);
-        let (content, usage, battery) = band_content(s, band, &workspaces, &title, actions);
+        let (content, anchors) = band_content(s, band, &workspaces, &title, actions);
         content.set_size_request(-1, top.round() as i32);
 
         let layers = gtk::Overlay::new();
@@ -111,7 +119,7 @@ impl Bar {
         frame.present();
         // The clock floats as the band's last overlay.
         let clock = content.last_child().expect("clock");
-        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title, clock, usage, battery }
+        Self { connector: monitor.connector().map(String::from), windows: [reserve, frame], workspaces, title, clock, anchors }
     }
 
     pub fn update(&self, state: &State) {
@@ -129,14 +137,19 @@ impl Bar {
         centre_x(self.title.widget.upcast_ref())
     }
 
+    /// Where the stats readout's centre sits, if the bar shows it.
+    pub fn stats_x(&self) -> Option<f64> {
+        centre_x(self.anchors.stats.as_ref()?)
+    }
+
     /// Where the battery's centre sits, if the bar shows it.
     pub fn battery_x(&self) -> Option<f64> {
-        self.battery.as_ref().filter(|b| b.is_visible()).and_then(centre_x)
+        self.anchors.battery.as_ref().filter(|b| b.is_visible()).and_then(centre_x)
     }
 
     /// Where the usage readout's centre sits, if the bar shows it.
     pub fn usage_x(&self) -> Option<f64> {
-        centre_x(self.usage.as_ref()?)
+        centre_x(self.anchors.usage.as_ref()?)
     }
 
     pub fn destroy(&self) {
@@ -222,7 +235,8 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>) -> (gtk::Overlay, Option<gtk::Widget>, Option<gtk::Widget>) {
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>) -> (gtk::Overlay, Anchors) {
+    let mut anchors = Anchors::default();
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
     let pill = |pad_x: f64| ModuleSpec { span, pad_x, filled: true, interactive: true, square: false };
@@ -238,10 +252,19 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     left.append(&mark.widget);
     left.append(&spaces.widget);
     if config::BAR_STATS {
-        let stats = Module::new(&stats::stats(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
+        let stats = Module::new(&stats::stats(s), pill(6.0 * s));
+        stats.connect_tapped({
+            let (widget, actions) = (stats.widget.downgrade(), actions.clone());
+            move || {
+                if let Some(x) = widget.upgrade().and_then(|w| centre_x(w.upcast_ref())) {
+                    (actions.resources)(x);
+                }
+            }
+        });
         left.append(&stats.widget);
+        anchors.stats = Some(stats.widget.upcast());
     }
-    let usage_widget = config::BAR_AGENT_USAGE.then(|| {
+    anchors.usage = config::BAR_AGENT_USAGE.then(|| {
         let usage = Module::new(&agent_usage::agent_usage(s), pill(6.0 * s));
         usage.connect_tapped({
             let (widget, actions) = (usage.widget.downgrade(), actions.clone());
@@ -314,11 +337,10 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let speed = Module::new(&net_speed::net_speed(s), ModuleSpec { interactive: false, ..pill(6.0 * s) });
         right.append(&speed.widget);
     }
-    let mut battery_widget = None;
     if config::BAR_STATUS {
         let cluster = status::status(s, actions.battery.clone());
         // The battery is the cluster's last glyph.
-        battery_widget = cluster.last_child();
+        anchors.battery = cluster.last_child();
         let status = Module::new(&cluster, ModuleSpec { interactive: false, ..pill(8.0 * s) });
         right.append(&status.widget);
     }
@@ -356,5 +378,5 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let x = (width / 2 - cw / 2).min(highest).max(lowest);
         Some(gdk::Rectangle::new(x, 0, cw, height))
     });
-    (content, usage_widget, battery_widget)
+    (content, anchors)
 }

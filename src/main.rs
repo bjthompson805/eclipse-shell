@@ -11,6 +11,8 @@ mod mark;
 mod media;
 mod popout;
 mod power;
+mod resources_popout;
+mod sysstats;
 mod theme;
 mod tray;
 mod usage_popout;
@@ -30,6 +32,7 @@ use calendar::Calendar;
 use hyprland::State;
 use launcher::Launcher;
 use power::Power;
+use resources_popout::ResourcesPopout;
 use usage_popout::UsagePopout;
 use window_popout::WindowPopout;
 
@@ -46,6 +49,7 @@ struct Shell {
     usage: Rc<UsagePopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
+    resources: Rc<ResourcesPopout>,
 }
 
 impl Shell {
@@ -65,7 +69,8 @@ impl Shell {
         self.calendar.set_monitor(focused.clone());
         self.usage.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
-        self.window.set_monitor(focused);
+        self.window.set_monitor(focused.clone());
+        self.resources.set_monitor(focused);
     }
 }
 
@@ -88,7 +93,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         bar.destroy();
     }
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
-    let (battery, window) = (shell_ref.battery.clone(), shell_ref.window.clone());
+    let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
         power: Rc::new(move || power.toggle()),
@@ -96,6 +101,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         usage: Rc::new(move |x| usage.toggle(x)),
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
+        resources: Rc::new(move |x| resources.toggle(x)),
     });
     let monitors = display.monitors();
     shell_ref.bars = (0..monitors.n_items())
@@ -113,6 +119,7 @@ struct Surfaces {
     usage: Rc<UsagePopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
+    resources: Rc<ResourcesPopout>,
     shell: Rc<RefCell<Shell>>,
 }
 
@@ -135,6 +142,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     tray::start();
     media::start();
     agent_usage::start();
+    sysstats::start();
 
     let launcher = Launcher::new(app);
     let power = Power::new(app);
@@ -142,7 +150,8 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let usage = UsagePopout::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), battery: battery.clone(), window: window.clone() }));
+    let resources = ResourcesPopout::new(app);
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -162,7 +171,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, battery, window, shell })
+    Some(Surfaces { launcher, power, calendar, usage, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -230,6 +239,14 @@ fn main() -> glib::ExitCode {
                     let bar = shell.focused_bar();
                     if let Some(x) = bar.and_then(Bar::title_x) {
                         surfaces.window.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-resources") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    if let Some(x) = shell.focused_bar().and_then(Bar::stats_x) {
+                        surfaces.resources.toggle(x);
                     }
                 }
             }
