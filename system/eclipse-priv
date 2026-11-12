@@ -19,13 +19,24 @@
 #       power-off if full-when-off is on (shutdown).
 #   eclipse-priv wifi on|off
 #       Bring every Wi-Fi interface up or down.
+#   eclipse-priv bt pair <addr> [name]
+#       Remember a device: name it in /etc/bluetooth/hosts and give hcsecd a
+#       PIN for it, so the first connection pairs.
+#   eclipse-priv bt forget <addr>
+#       Undo pair, audio and input for a device.
+#   eclipse-priv bt audio on|off <addr>
+#       A virtual_oss profile playing to a headset or speaker.
+#   eclipse-priv bt input on|off <addr>
+#       A keyboard or mouse through bthidd.
+#   eclipse-priv bt power on|off
+#       Detach or attach the adapter's driver.
 #
 # SPDX-License-Identifier: BSD-2-Clause
 set -eu
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 usage() {
-	sed -n '6,22p' "$0" >&2
+	sed -n '6,34p' "$0" >&2
 	exit 2
 }
 
@@ -162,10 +173,178 @@ wifi() {
 	esac
 }
 
-[ $# -ge 2 ] && [ $# -le 3 ] || usage
+# ---- bluetooth ---------------------------------------------------------------
+
+# FreeBSD's own stack has no Secure Simple Pairing, so devices fall back to a
+# legacy PIN, which hcsecd answers from its config; headsets take 0000. The
+# hosts file is the world-readable list of what's paired. Each audio device
+# gets a virtual_oss profile named "bt" plus the address's last six digits
+# (virtual_oss rejects long names), serving /dev/dsp.<profile>; eclipse-shell
+# gives PipeWire a sink for it.
+BT_HOSTS=/etc/bluetooth/hosts
+BT_SECD=/etc/bluetooth/hcsecd.conf
+BT_KEYS=/var/db/hcsecd.keys
+BT_HID=/etc/bluetooth/bthidd.conf
+# The adapter is there but switched off; lists the USB devices to bring back.
+BT_OFF=/var/run/eclipse-bt.off
+
+bt_address() {
+	case "$1" in
+	[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;;
+	*) echo "not a Bluetooth address: $1" >&2; exit 2 ;;
+	esac
+}
+
+bt_profile() {
+	echo "bt$(echo "$1" | tr -d : | cut -c7-12)"
+}
+
+# without_line <file> <addr>: rewrite a file minus the lines naming addr.
+without_line() {
+	[ -f "$1" ] || return 0
+	mode=$(stat -f %Lp "$1")
+	grep -vi "^$2[[:space:]]" "$1" >"$1.new" || :
+	chmod "$mode" "$1.new"
+	mv -f "$1.new" "$1"
+}
+
+# without_block <file> <addr>: drop the `device { ... }` blocks for addr from
+# an hcsecd or bthidd config, which share that layout.
+without_block() {
+	[ -f "$1" ] || return 0
+	mode=$(stat -f %Lp "$1")
+	awk -v addr="$2" '
+		/^[ \t]*device[ \t]*\{/ { block = $0 "\n"; inside = 1; match_ = 0; next }
+		inside {
+			block = block $0 "\n"
+			if (tolower($0) ~ "bdaddr[ \t]+" addr) match_ = 1
+			if ($0 ~ /^[ \t]*\}/) { if (!match_) printf "%s", block; inside = 0 }
+			next
+		}
+		{ print }
+	' "$1" >"$1.new"
+	chmod "$mode" "$1.new"
+	mv -f "$1.new" "$1"
+}
+
+restart_service() {
+	sysrc -q "$1_enable=YES" >/dev/null
+	service "$1" restart >/dev/null 2>&1 || service "$1" start >/dev/null
+}
+
+bt_audio() {
+	profile=$(bt_profile "$2")
+	configs=$(sysrc -n virtual_oss_configs 2>/dev/null) || configs=
+	case "$1" in
+	on)
+		kldload -n cuse
+		case " $configs " in *" $profile "*) ;; *) configs="${configs:+$configs }$profile" ;; esac
+		# -R /dev/null: a headset's microphone is on the Handsfree profile,
+		# which virtual_oss doesn't speak.
+		sysrc -q virtual_oss_enable=YES virtual_oss_configs="$configs" \
+			"virtual_oss_$profile=-C 2 -c 2 -r 48000 -b 16 -s 4ms -R /dev/null -P /dev/bluetooth/$profile -d dsp.$profile" >/dev/null
+		pid=/var/run/virtual_oss/$profile.pid
+		if ! { [ -f "$pid" ] && kill -0 "$(cat "$pid")" 2>/dev/null; }; then
+			service virtual_oss start "$profile" >/dev/null
+		fi
+		;;
+	off)
+		if [ -f "/var/run/virtual_oss/$profile.pid" ]; then
+			service virtual_oss stop "$profile" >/dev/null 2>&1 || :
+		fi
+		configs=$(echo " $configs " | sed "s/ $profile / /g; s/^ *//; s/ *\$//")
+		sysrc -q virtual_oss_configs="$configs" >/dev/null
+		sysrc -qx "virtual_oss_$profile" 2>/dev/null || :
+		;;
+	*) usage ;;
+	esac
+}
+
+bt_input() {
+	case "$1" in
+	on)
+		if ! grep -qi "bdaddr[[:space:]]*$2" "$BT_HID" 2>/dev/null; then
+			query=$(bthidcontrol -a "$2" query) || { echo "the device didn't answer the HID query" >&2; exit 1; }
+			printf '%s\n' "$query" >>"$BT_HID"
+		fi
+		restart_service bthidd
+		;;
+	off)
+		without_block "$BT_HID" "$2"
+		if service bthidd status >/dev/null 2>&1; then service bthidd restart >/dev/null; fi
+		;;
+	*) usage ;;
+	esac
+}
+
+# Power off unconfigures the adapter's USB device, which detaches ng_ubt as
+# unplugging it would; configuring it again has USB probe it afresh. (devctl
+# disable/enable re-probes a USB child outside bus enumeration and panics.)
+bt_power() {
+	case "$1" in
+	off)
+		ugens=$(sysctl -n $(sysctl -N dev.ubt 2>/dev/null | grep '\.%location$') 2>/dev/null |
+			sed -n 's/.*ugen=\(ugen[0-9]*\.[0-9]*\).*/\1/p' | sort -u)
+		[ -n "$ugens" ] || { echo "no Bluetooth adapter to turn off" >&2; exit 1; }
+		printf '%s\n' $ugens >>"$BT_OFF"
+		for g in $ugens; do usbconfig -d "$g" set_config 255 >/dev/null 2>&1 || :; done
+		;;
+	on)
+		if [ -f "$BT_OFF" ]; then
+			while read -r g; do
+				case "$g" in ugen[0-9]*.[0-9]*) usbconfig -d "$g" set_config 0 >/dev/null 2>&1 || : ;; esac
+			done <"$BT_OFF"
+		fi
+		rm -f "$BT_OFF"
+		;;
+	*) usage ;;
+	esac
+}
+
+bt() {
+	case "$1" in
+	pair)
+		bt_address "$2"
+		profile=$(bt_profile "$2")
+		# hosts(5) names are one word; the profile doubles as an alias.
+		name=$(printf '%s' "${3:-}" | tr -c 'A-Za-z0-9_-' _ | cut -c1-40)
+		[ -n "$name" ] || name=$profile
+		without_line "$BT_HOSTS" "$2"
+		printf '%s\t%s %s\n' "$2" "$name" "$profile" >>"$BT_HOSTS"
+		chmod 644 "$BT_HOSTS"
+		without_block "$BT_SECD" "$2"
+		printf '\ndevice {\n\tbdaddr\t%s;\n\tname\t"%s";\n\tkey\tnokey;\n\tpin\t"0000";\n}\n' "$2" "$name" >>"$BT_SECD"
+		chmod 600 "$BT_SECD"
+		restart_service hcsecd
+		restart_service sdpd
+		;;
+	forget)
+		bt_address "$2"
+		bt_audio off "$2"
+		bt_input off "$2"
+		without_block "$BT_SECD" "$2"
+		without_line "$BT_KEYS" "$2"
+		without_line "$BT_HOSTS" "$2"
+		if service hcsecd status >/dev/null 2>&1; then service hcsecd restart >/dev/null; fi
+		;;
+	audio | input)
+		[ $# -eq 3 ] || usage
+		bt_address "$3"
+		"bt_$1" "$2" "$3"
+		;;
+	power)
+		[ $# -eq 2 ] || usage
+		bt_power "$2"
+		;;
+	*) usage ;;
+	esac
+}
+
+[ $# -ge 2 ] && [ $# -le 4 ] || usage
 case "$1" in
 power-profile) [ $# -eq 2 ] || usage; power_profile "$2" ;;
 charge-limit) shift; charge_limit "$@" ;;
 wifi) [ $# -eq 2 ] || usage; wifi "$2" ;;
+bt) shift; bt "$@" ;;
 *) usage ;;
 esac

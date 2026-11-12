@@ -1,6 +1,6 @@
 //! Status cluster: volume, display brightness, network, Bluetooth and
 //! battery, as a row of glyphs. Scrolling the volume or brightness glyph
-//! nudges it; clicking any but Bluetooth opens its popout.
+//! nudges it; clicking one opens its popout.
 //!
 //! One small shell script gathers every reading every two seconds (wpctl,
 //! backlight, ifconfig, hccontrol, sysctl), and again right after a scroll.
@@ -32,6 +32,8 @@ n=$(hccontrol read_node_list 2>/dev/null | awk 'NR==2{print $1}')
 if [ -n "$n" ]; then
     echo 'bt=1'
     printf 'btconn=%s\n' "$(hccontrol -n "$n" read_connection_list 2>/dev/null | grep -c ' OPEN')"
+elif [ -f /var/run/eclipse-bt.off ]; then
+    echo 'btoff=1'
 fi
 sysctl -i hw.acpi.battery.units hw.acpi.battery.life hw.acpi.battery.state
 "#;
@@ -44,6 +46,8 @@ struct Reading {
     route: String,
     wifi: Option<Wifi>,
     bluetooth: Option<u32>,
+    /// The adapter is there but switched off.
+    bluetooth_off: bool,
     battery: Option<Battery>,
 }
 
@@ -90,6 +94,7 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
     on_click(&volume, actions.mixer.clone());
     on_click(&sun, actions.display.clone());
     on_click(&network, actions.network.clone());
+    on_click(&bluetooth, actions.bluetooth.clone());
     on_click(&battery_row, actions.battery.clone());
 
     let reading = Rc::new(RefCell::new(Reading::default()));
@@ -118,9 +123,13 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
             let (name, color) = network_glyph(&r);
             set_glyph(&network, name, glyph_px, color);
 
-            bluetooth.set_visible(r.bluetooth.is_some());
-            let name = if r.bluetooth.unwrap_or(0) > 0 { "bluetooth_connected" } else { "bluetooth" };
-            set_glyph(&bluetooth, name, glyph_px, SUBTLE);
+            bluetooth.set_visible(r.bluetooth.is_some() || r.bluetooth_off);
+            let (name, color) = match r.bluetooth {
+                None => ("bluetooth_disabled", FAINT),
+                Some(0) => ("bluetooth", SUBTLE),
+                Some(_) => ("bluetooth_connected", SUBTLE),
+            };
+            set_glyph(&bluetooth, name, glyph_px, color);
 
             battery_row.set_visible(r.battery.is_some());
             if let Some(b) = r.battery {
@@ -300,6 +309,7 @@ fn parse(text: &str) -> Reading {
         route: v.get("route").copied().unwrap_or("").to_owned(),
         wifi,
         bluetooth: v.get("bt").map(|_| num("btconn").unwrap_or(0.0) as u32),
+        bluetooth_off: v.contains_key("btoff"),
         battery,
     }
 }

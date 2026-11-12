@@ -2,6 +2,8 @@ mod agent_usage;
 mod anim;
 mod bar;
 mod battery_popout;
+mod bluetooth;
+mod bluetooth_popout;
 mod calendar;
 mod config;
 mod display_popout;
@@ -34,6 +36,7 @@ use gtk4 as gtk;
 
 use bar::{Actions, Bar};
 use battery_popout::BatteryPopout;
+use bluetooth_popout::BluetoothPopout;
 use calendar::Calendar;
 use display_popout::DisplayPopout;
 use hyprland::State;
@@ -59,6 +62,7 @@ struct Shell {
     mixer: Rc<MixerPopout>,
     display: Rc<DisplayPopout>,
     network: Rc<NetworkPopout>,
+    bluetooth: Rc<BluetoothPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -83,6 +87,7 @@ impl Shell {
         self.mixer.set_monitor(focused.clone());
         self.display.set_monitor(focused.clone());
         self.network.set_monitor(focused.clone());
+        self.bluetooth.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -108,7 +113,8 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         bar.destroy();
     }
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
-    let (mixer, display_popout, network) = (shell_ref.mixer.clone(), shell_ref.display.clone(), shell_ref.network.clone());
+    let (mixer, display_popout) = (shell_ref.mixer.clone(), shell_ref.display.clone());
+    let (network, bluetooth) = (shell_ref.network.clone(), shell_ref.bluetooth.clone());
     let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
@@ -118,6 +124,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         mixer: Rc::new(move |x| mixer.toggle(x)),
         display: Rc::new(move |x| display_popout.toggle(x)),
         network: Rc::new(move |x| network.toggle(x)),
+        bluetooth: Rc::new(move |x| bluetooth.toggle(x)),
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
         resources: Rc::new(move |x| resources.toggle(x)),
@@ -139,6 +146,7 @@ struct Surfaces {
     mixer: Rc<MixerPopout>,
     display: Rc<DisplayPopout>,
     network: Rc<NetworkPopout>,
+    bluetooth: Rc<BluetoothPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -166,6 +174,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     agent_usage::start();
     sysstats::start();
     display_popout::restore();
+    bluetooth::start();
 
     let launcher = Launcher::new(app);
     let power = Power::new(app);
@@ -174,10 +183,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let mixer = MixerPopout::new(app);
     let display_popout = DisplayPopout::new(app);
     let network = NetworkPopout::new(app);
+    let bluetooth = BluetoothPopout::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -197,7 +207,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -271,6 +281,14 @@ fn main() -> glib::ExitCode {
                     let shell = surfaces.shell.borrow();
                     if let Some(x) = shell.focused_bar().and_then(Bar::network_x) {
                         surfaces.network.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-bluetooth") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    if let Some(x) = shell.focused_bar().and_then(Bar::bluetooth_x) {
+                        surfaces.bluetooth.toggle(x);
                     }
                 }
             }
