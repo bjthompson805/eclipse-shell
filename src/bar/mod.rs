@@ -322,7 +322,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
     let edge_margin = (24.0 * s).round() as i32;
     let pill = |pad_x: f64| ModuleSpec { span, pad_x, filled: true, interactive: true, square: false };
 
-    let mark = Module::new(&mark::mark(11.0 * s), ModuleSpec { filled: false, square: true, ..pill(0.0) });
+    let mark = Module::new(&mark::mark(15.0 * s), ModuleSpec { filled: false, square: true, ..pill(0.0) });
     mark.connect_tapped({
         let actions = actions.clone();
         move || (actions.launcher)()
