@@ -58,7 +58,8 @@ pub struct Launcher {
     height: Rc<RefCell<Tween>>,
     open: Cell<bool>,
     /// The compositor blur to put back on close: (enabled, size).
-    saved_blur: Cell<Option<(bool, i64)>>,
+    /// The launcher is keeping Hyprland's blur on; see [`hyprland::hold_blur`].
+    holding_blur: Cell<bool>,
     monitor: RefCell<Option<gdk::Monitor>>,
 }
 
@@ -98,7 +99,7 @@ impl Launcher {
             openness: Tween::shared(OPEN_MS, MORPH),
             height: Tween::shared(RESIZE_MS, MORPH),
             open: Cell::new(false),
-            saved_blur: Cell::new(None),
+            holding_blur: Cell::new(false),
             monitor: RefCell::default(),
         });
 
@@ -183,20 +184,14 @@ impl Launcher {
     }
 
     fn force_blur(&self) {
-        if config::LAUNCHER_BLUR <= 0 || self.saved_blur.get().is_some() {
-            return;
+        if config::LAUNCHER_BLUR > 0 && !self.holding_blur.replace(true) {
+            hyprland::hold_blur(config::LAUNCHER_BLUR);
         }
-        let enabled = hyprland::option_json("decoration:blur:enabled")
-            .map(|v| v.get("bool").and_then(|b| b.as_bool()).or_else(|| v.get("int").and_then(|i| i.as_i64()).map(|i| i != 0)).unwrap_or(false))
-            .unwrap_or(false);
-        let size = hyprland::option_json("decoration:blur:size").and_then(|v| v.get("int")?.as_i64()).filter(|&s| s > 0).unwrap_or(5);
-        self.saved_blur.set(Some((enabled, size)));
-        set_blur(true, config::LAUNCHER_BLUR);
     }
 
     fn restore_blur(&self) {
-        if let Some((enabled, size)) = self.saved_blur.take() {
-            set_blur(enabled, size);
+        if self.holding_blur.replace(false) {
+            hyprland::release_blur();
         }
     }
 
@@ -421,9 +416,6 @@ fn resting_height(s: f64) -> f64 {
     46.0 * s + 1.0 + dashboard::height(s) + 32.0 * s
 }
 
-fn set_blur(enabled: bool, size: i64) {
-    hyprland::eval(&format!("hl.config({{ decoration = {{ blur = {{ enabled = {enabled}, size = {} }} }} }})", size.max(1)));
-}
 
 /// A 30px square button that tints on hover, drawn with `paint`.
 fn square_button(s: f64, paint: impl Fn(&gtk::cairo::Context, f64, f64, bool) + 'static) -> gtk::DrawingArea {

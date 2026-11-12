@@ -27,7 +27,9 @@ pub fn note(s: f64, text: &str, width: f64) -> gtk::Overlay {
     framed(s, &label, 11.0, 8.0)
 }
 
-fn framed(s: f64, label: &gtk::Label, pad_x: f64, pad_y: f64) -> gtk::Overlay {
+/// Any label on the hint's outlined pill, padded by `pad_x` and `pad_y` logical
+/// px; for text that has to read over anything, such as the overview's footer.
+pub fn framed(s: f64, label: &gtk::Label, pad_x: f64, pad_y: f64) -> gtk::Overlay {
     let (x, y) = ((pad_x * s).round() as i32, (pad_y * s).round() as i32);
     label.set_margin_start(x);
     label.set_margin_end(x);

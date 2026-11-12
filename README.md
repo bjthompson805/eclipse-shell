@@ -49,4 +49,8 @@ Settings currently live in `src/config.rs`.
 
 BSD 2-Clause; see [LICENSE](LICENSE). The weather icons' path data comes from
 Feather (MIT); see [LICENSES/Feather-MIT.txt](LICENSES/Feather-MIT.txt).
+`protocols/hyprland-toplevel-export-v1.xml` is from
+[hyprland-protocols](https://github.com/hyprwm/hyprland-protocols) (BSD
+3-Clause); see
+[LICENSES/hyprland-protocols-BSD-3-Clause.txt](LICENSES/hyprland-protocols-BSD-3-Clause.txt).
 Weather data is from [Open-Meteo](https://open-meteo.com).

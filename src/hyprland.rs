@@ -105,6 +105,11 @@ pub fn move_window(address: &str, workspace: i32) {
     command("moving a window", &format!("dispatch hl.dsp.window.move({{ workspace = {workspace}, window = \"address:{address}\" }})"));
 }
 
+/// Asks a window to close, as its own close button would.
+pub fn close_window(address: &str) {
+    command("closing a window", &format!("dispatch hl.dsp.window.close({{ window = \"address:{address}\" }})"));
+}
+
 /// Where everything sits, for drawing workspaces as maps.
 #[derive(Clone, Debug, Default)]
 pub struct Layout {
@@ -225,6 +230,46 @@ pub fn layout() -> io::Result<Layout> {
 /// Ends the Hyprland session.
 pub fn exit() {
     command("exiting", "dispatch hl.dsp.exit()");
+}
+
+thread_local! {
+    /// How many surfaces are holding blur on, and the settings from before
+    /// the first did.
+    static BLUR_HOLDS: std::cell::RefCell<(u32, Option<(bool, i64)>)> = const { std::cell::RefCell::new((0, None)) };
+}
+
+/// Turns Hyprland's blur on at `size` for a surface that wants the desktop
+/// blurred behind it, until a matching [`release_blur`]. The first hold saves
+/// the user's settings and the last release puts them back.
+pub fn hold_blur(size: i64) {
+    BLUR_HOLDS.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.0 == 0 {
+            let enabled = option_json("decoration:blur:enabled")
+                .map(|v| v.get("bool").and_then(|b| b.as_bool()).or_else(|| v.get("int").and_then(|i| i.as_i64()).map(|i| i != 0)).unwrap_or(false))
+                .unwrap_or(false);
+            let saved = option_json("decoration:blur:size").and_then(|v| v.get("int")?.as_i64()).filter(|&s| s > 0).unwrap_or(5);
+            h.1 = Some((enabled, saved));
+        }
+        h.0 += 1;
+    });
+    set_blur(true, size);
+}
+
+pub fn release_blur() {
+    BLUR_HOLDS.with(|h| {
+        let mut h = h.borrow_mut();
+        h.0 = h.0.saturating_sub(1);
+        if h.0 == 0 {
+            if let Some((enabled, size)) = h.1.take() {
+                set_blur(enabled, size);
+            }
+        }
+    });
+}
+
+fn set_blur(enabled: bool, size: i64) {
+    eval(&format!("hl.config({{ decoration = {{ blur = {{ enabled = {enabled}, size = {} }} }} }})", size.max(1)));
 }
 
 /// Evaluates Lua against the running Hyprland config.
