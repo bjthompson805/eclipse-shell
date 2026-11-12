@@ -233,3 +233,66 @@ pub fn on_click(widget: &impl IsA<gtk::Widget>, f: impl Fn() + 'static) {
     click.connect_released(move |_, _, _, _| f());
     widget.add_controller(click);
 }
+
+/// Lets a label fill what its row leaves it, ellipsized, rather than
+/// widening the card to fit its whole text.
+pub fn fill(label: &gtk::Label) {
+    label.set_hexpand(true);
+    label.set_xalign(0.0);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.set_max_width_chars(1);
+}
+
+/// Wires hover redraws and a click onto a drawn control.
+pub fn clickable(area: &gtk::DrawingArea, hovered: &Rc<Cell<bool>>, enabled: bool, pressed: impl Fn() + 'static) {
+    if !enabled {
+        return;
+    }
+    area.set_cursor_from_name(Some("pointer"));
+    let motion = gtk::EventControllerMotion::new();
+    for entering in [true, false] {
+        let (area, hovered) = (area.downgrade(), hovered.clone());
+        let update = move || {
+            hovered.set(entering);
+            area.upgrade().into_iter().for_each(|a| a.queue_draw());
+        };
+        if entering {
+            motion.connect_enter(move |_, _, _| update());
+        } else {
+            motion.connect_leave(move |_| update());
+        }
+    }
+    area.add_controller(motion);
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |_, _, _, _| pressed());
+    area.add_controller(click);
+}
+
+/// An on/off switch: a pill track with a knob that sits right when on.
+pub fn switch(s: f64, on: bool, enabled: bool, pressed: impl Fn() + 'static) -> gtk::DrawingArea {
+    let area = gtk::DrawingArea::builder().content_width((30.0 * s).round() as i32).content_height((16.0 * s).round() as i32).valign(gtk::Align::Center).build();
+    let hovered = Rc::new(Cell::new(false));
+    area.set_draw_func({
+        let hovered = hovered.clone();
+        move |_, cr, w, h| {
+            let (w, h) = (f64::from(w), f64::from(h));
+            let palette = theme::palette();
+            theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, (h - 1.0) / 2.0);
+            theme::set_source(cr, if on { palette.accent.alpha(0.35) } else { theme::BRIGHT.alpha(0.06) });
+            let _ = cr.fill_preserve();
+            cr.set_line_width(1.0);
+            theme::set_source(cr, if on { palette.accent_lit } else if hovered.get() { palette.edge } else { palette.outline });
+            let _ = cr.stroke();
+            let r = h / 2.0 - 3.0;
+            let cx = if on { w - h / 2.0 } else { h / 2.0 };
+            cr.arc(cx, h / 2.0, r, 0.0, std::f64::consts::TAU);
+            theme::set_source(cr, if on { theme::CREAM } else { theme::ICON_DIM });
+            let _ = cr.fill();
+        }
+    });
+    if !enabled {
+        area.set_opacity(0.5);
+    }
+    clickable(&area, &hovered, enabled, pressed);
+    area
+}

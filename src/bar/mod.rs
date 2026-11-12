@@ -43,6 +43,7 @@ pub struct Actions {
     pub usage: Rc<dyn Fn(f64)>,
     pub mixer: Rc<dyn Fn(f64)>,
     pub display: Rc<dyn Fn(f64)>,
+    pub network: Rc<dyn Fn(f64)>,
     pub battery: Rc<dyn Fn(f64)>,
     pub window: Rc<dyn Fn(f64)>,
     pub resources: Rc<dyn Fn(f64)>,
@@ -55,6 +56,7 @@ struct Anchors {
     usage: Option<gtk::Widget>,
     volume: Option<gtk::Widget>,
     display: Option<gtk::Widget>,
+    network: Option<gtk::Widget>,
     battery: Option<gtk::Widget>,
 }
 
@@ -154,6 +156,11 @@ impl Bar {
     /// Where the sun's centre sits, if the bar shows it.
     pub fn display_x(&self) -> Option<f64> {
         self.anchors.display.as_ref().filter(|d| d.is_visible()).and_then(centre_x)
+    }
+
+    /// Where the network glyph's centre sits, if the bar shows it.
+    pub fn network_x(&self) -> Option<f64> {
+        centre_x(self.anchors.network.as_ref()?)
     }
 
     /// Where the battery's centre sits, if the bar shows it.
@@ -352,10 +359,11 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         right.append(&speed.widget);
     }
     if config::BAR_STATUS {
-        let cluster = status::status(s, actions.mixer.clone(), actions.display.clone(), actions.battery.clone());
-        // Volume and the sun lead the cluster; the battery ends it.
+        let cluster = status::status(s, actions);
+        // Volume, the sun and the network glyph lead the cluster; the battery ends it.
         anchors.volume = cluster.first_child();
         anchors.display = anchors.volume.as_ref().and_then(|v| v.next_sibling());
+        anchors.network = anchors.display.as_ref().and_then(|d| d.next_sibling());
         anchors.battery = cluster.last_child();
         let status = Module::new(&cluster, ModuleSpec { interactive: false, ..pill(8.0 * s) });
         right.append(&status.widget);

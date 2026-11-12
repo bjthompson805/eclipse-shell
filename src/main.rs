@@ -11,6 +11,7 @@ mod icons;
 mod launcher;
 mod mark;
 mod media;
+mod network_popout;
 mod mixer_popout;
 mod popout;
 mod power;
@@ -20,6 +21,7 @@ mod theme;
 mod tray;
 mod usage_popout;
 mod weather;
+mod wifi;
 mod window_popout;
 
 use std::cell::{OnceCell, RefCell};
@@ -36,6 +38,7 @@ use display_popout::DisplayPopout;
 use hyprland::State;
 use launcher::Launcher;
 use mixer_popout::MixerPopout;
+use network_popout::NetworkPopout;
 use power::Power;
 use resources_popout::ResourcesPopout;
 use usage_popout::UsagePopout;
@@ -54,6 +57,7 @@ struct Shell {
     usage: Rc<UsagePopout>,
     mixer: Rc<MixerPopout>,
     display: Rc<DisplayPopout>,
+    network: Rc<NetworkPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -77,6 +81,7 @@ impl Shell {
         self.usage.set_monitor(focused.clone());
         self.mixer.set_monitor(focused.clone());
         self.display.set_monitor(focused.clone());
+        self.network.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
         self.resources.set_monitor(focused);
@@ -102,7 +107,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         bar.destroy();
     }
     let (launcher, power, calendar, usage) = (shell_ref.launcher.clone(), shell_ref.power.clone(), shell_ref.calendar.clone(), shell_ref.usage.clone());
-    let (mixer, display_popout) = (shell_ref.mixer.clone(), shell_ref.display.clone());
+    let (mixer, display_popout, network) = (shell_ref.mixer.clone(), shell_ref.display.clone(), shell_ref.network.clone());
     let (battery, window, resources) = (shell_ref.battery.clone(), shell_ref.window.clone(), shell_ref.resources.clone());
     let actions = Rc::new(Actions {
         launcher: Rc::new(move || launcher.toggle()),
@@ -111,6 +116,7 @@ fn rebuild_bars(app: &gtk::Application, display: &gdk::Display, shell: &Rc<RefCe
         usage: Rc::new(move |x| usage.toggle(x)),
         mixer: Rc::new(move |x| mixer.toggle(x)),
         display: Rc::new(move |x| display_popout.toggle(x)),
+        network: Rc::new(move |x| network.toggle(x)),
         battery: Rc::new(move |x| battery.toggle(x)),
         window: Rc::new(move |x| window.toggle(x)),
         resources: Rc::new(move |x| resources.toggle(x)),
@@ -131,6 +137,7 @@ struct Surfaces {
     usage: Rc<UsagePopout>,
     mixer: Rc<MixerPopout>,
     display: Rc<DisplayPopout>,
+    network: Rc<NetworkPopout>,
     battery: Rc<BatteryPopout>,
     window: Rc<WindowPopout>,
     resources: Rc<ResourcesPopout>,
@@ -165,10 +172,11 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let usage = UsagePopout::new(app);
     let mixer = MixerPopout::new(app);
     let display_popout = DisplayPopout::new(app);
+    let network = NetworkPopout::new(app);
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
-    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
+    let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
     display.monitors().connect_items_changed({
@@ -188,7 +196,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
         }
     });
 
-    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, battery, window, resources, shell })
+    Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, battery, window, resources, shell })
 }
 
 /// The first instance runs the shell. Later invocations, e.g.
@@ -254,6 +262,14 @@ fn main() -> glib::ExitCode {
                     let shell = surfaces.shell.borrow();
                     if let Some(x) = shell.focused_bar().and_then(Bar::display_x) {
                         surfaces.display.toggle(x);
+                    }
+                }
+            }
+            Some("toggle-network") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    if let Some(x) = shell.focused_bar().and_then(Bar::network_x) {
+                        surfaces.network.toggle(x);
                     }
                 }
             }

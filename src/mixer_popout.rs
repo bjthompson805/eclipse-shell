@@ -236,7 +236,7 @@ impl MixerPopout {
         head.append(&theme::icon_glyph(node.map_or(fallback, |n| n.glyph), 15.0 * s, icon));
         let none = if kind == Kind::Output { "No output" } else { "No input" };
         let name = TextStyle::new(11.5 * s, pango::Weight::Semibold, text).label(node.map_or(none, |n| &n.label));
-        fill(&name);
+        popout::fill(&name);
         head.append(&name);
         if candidates.len() > 1 {
             head.append(&TextStyle::new(9.0 * s, pango::Weight::Semibold, FAINT).label(&candidates.len().to_string()));
@@ -292,7 +292,7 @@ impl MixerPopout {
         image.set_pixel_size(px(16.0));
         head.append(&image);
         let name = TextStyle::new(10.5 * s, pango::Weight::Semibold, SUBTLE).label(&node.label);
-        fill(&name);
+        popout::fill(&name);
         head.append(&name);
         let fader = volume_fader(s, node, ("volume_up", "volume_off"), 15.0 * s, false);
         head.append(&fader.glyph);
@@ -434,7 +434,7 @@ fn pick_row(s: f64, node: &Node, current: bool, pressed: impl Fn() + 'static) ->
     content.append(&theme::icon_glyph(node.glyph, 14.0 * s, if current { accent } else { ICON_DIM }));
     let (weight, color) = if current { (pango::Weight::Semibold, CREAM) } else { (pango::Weight::Medium, SUBTLE) };
     let name = TextStyle::new(10.5 * s, weight, color).label(&node.label);
-    fill(&name);
+    popout::fill(&name);
     content.append(&name);
     if current {
         let dot = gtk::DrawingArea::builder().content_width(px(5.0)).content_height(px(5.0)).valign(gtk::Align::Center).build();
@@ -459,11 +459,3 @@ fn pick_row(s: f64, node: &Node, current: bool, pressed: impl Fn() + 'static) ->
     row
 }
 
-/// Lets a label fill what its row leaves it, ellipsized, rather than
-/// widening the card to fit its whole text.
-fn fill(label: &gtk::Label) {
-    label.set_hexpand(true);
-    label.set_xalign(0.0);
-    label.set_ellipsize(pango::EllipsizeMode::End);
-    label.set_max_width_chars(1);
-}

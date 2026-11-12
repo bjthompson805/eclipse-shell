@@ -1,6 +1,6 @@
 //! Status cluster: volume, display brightness, network, Bluetooth and
 //! battery, as a row of glyphs. Scrolling the volume or brightness glyph
-//! nudges it; clicking the volume glyph, the sun or the battery opens its popout.
+//! nudges it; clicking any but Bluetooth opens its popout.
 //!
 //! One small shell script gathers every reading every two seconds (wpctl,
 //! backlight, ifconfig, hccontrol, sysctl), and again right after a scroll.
@@ -66,9 +66,7 @@ impl Battery {
     }
 }
 
-/// `on_volume`, `on_display` and `on_battery` open the mixer, display and
-/// battery popouts under the given x.
-pub fn status(s: f64, on_volume: Rc<dyn Fn(f64)>, on_display: Rc<dyn Fn(f64)>, on_battery: Rc<dyn Fn(f64)>) -> gtk::Box {
+pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
     let glyph_px = 14.0 * s;
     let slot = (glyph_px + 4.0 * s).round() as i32;
     let row = gtk::Box::new(gtk::Orientation::Horizontal, (9.0 * s).round() as i32);
@@ -89,9 +87,10 @@ pub fn status(s: f64, on_volume: Rc<dyn Fn(f64)>, on_display: Rc<dyn Fn(f64)>, o
     battery_row.append(&battery);
     battery_row.append(&battery_pct);
     row.append(&battery_row);
-    on_click(&volume, on_volume);
-    on_click(&sun, on_display);
-    on_click(&battery_row, on_battery);
+    on_click(&volume, actions.mixer.clone());
+    on_click(&sun, actions.display.clone());
+    on_click(&network, actions.network.clone());
+    on_click(&battery_row, actions.battery.clone());
 
     let reading = Rc::new(RefCell::new(Reading::default()));
     sun.set_draw_func({
@@ -196,15 +195,8 @@ fn network_glyph(r: &Reading) -> (&'static str, Rgba) {
         return ("wifi_off", FAINT);
     }
     let Some(rssi) = wifi.rssi.filter(|_| r.route.starts_with("wlan")) else { return ("signal_wifi_off", FAINT) };
-    // Rough bands for signal over noise: 40 dB and up is as good as it gets.
-    let level = (rssi / 40.0).clamp(0.0, 1.0);
-    let name = match level {
-        l if l > 0.8 => "signal_wifi_4_bar",
-        l if l > 0.55 => "network_wifi_3_bar",
-        l if l > 0.3 => "network_wifi_2_bar",
-        _ => "network_wifi_1_bar",
-    };
-    (name, SUBTLE)
+    // Signal over noise: 40 dB and up is as good as it gets.
+    (crate::wifi::signal_glyph((rssi / 40.0).clamp(0.0, 1.0)), SUBTLE)
 }
 
 fn battery_glyph(b: Battery) -> &'static str {

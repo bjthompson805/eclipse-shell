@@ -17,13 +17,15 @@
 #   eclipse-priv charge-limit probe|apply|release
 #       Check for support; write the limit (boot); lift it to 100% before
 #       power-off if full-when-off is on (shutdown).
+#   eclipse-priv wifi on|off
+#       Bring every Wi-Fi interface up or down.
 #
 # SPDX-License-Identifier: BSD-2-Clause
 set -eu
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 usage() {
-	sed -n '6,20p' "$0" >&2
+	sed -n '6,22p' "$0" >&2
 	exit 2
 }
 
@@ -150,9 +152,20 @@ charge_limit() {
 	esac
 }
 
+# ---- wifi --------------------------------------------------------------------
+
+wifi() {
+	case "$1" in
+	on) for i in $(ifconfig -g wlan); do ifconfig "$i" up; done ;;
+	off) for i in $(ifconfig -g wlan); do ifconfig "$i" down; done ;;
+	*) usage ;;
+	esac
+}
+
 [ $# -ge 2 ] && [ $# -le 3 ] || usage
 case "$1" in
 power-profile) [ $# -eq 2 ] || usage; power_profile "$2" ;;
 charge-limit) shift; charge_limit "$@" ;;
+wifi) [ $# -eq 2 ] || usage; wifi "$2" ;;
 *) usage ;;
 esac
