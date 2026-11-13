@@ -20,19 +20,19 @@ use crate::theme::{self, Rgba, TextStyle, FAINT, FLAME, SUBTLE};
 
 const POLL: Duration = Duration::from_secs(2);
 const READ: &str = r#"
-printf 'vol=%s\n' "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)"
-printf 'bright=%s\n' "$(backlight -q 2>/dev/null)"
-printf 'route=%s\n' "$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
+printf 'vol=%s\n' "$(timeout 2 wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)"
+printf 'bright=%s\n' "$(timeout 2 backlight -q 2>/dev/null)"
+printf 'route=%s\n' "$(timeout 2 route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
 w=$(ifconfig -l | tr ' ' '\n' | grep '^wlan' | head -1)
 if [ -n "$w" ]; then
     printf 'wlan=%s\n' "$w"
     ifconfig "$w" | head -1 | grep -q '<UP' && echo 'radio=1'
-    printf 'rssi=%s\n' "$(ifconfig "$w" list sta 2>/dev/null | awk 'NR==2{print $5}')"
+    printf 'rssi=%s\n' "$(timeout 2 ifconfig "$w" list sta 2>/dev/null | awk 'NR==2{print $5}')"
 fi
-n=$(hccontrol read_node_list 2>/dev/null | awk 'NR==2{print $1}')
+n=$(timeout 2 hccontrol read_node_list 2>/dev/null | awk 'NR==2{print $1}')
 if [ -n "$n" ]; then
     echo 'bt=1'
-    printf 'btconn=%s\n' "$(hccontrol -n "$n" read_connection_list 2>/dev/null | grep -c ' OPEN')"
+    printf 'btconn=%s\n' "$(timeout 2 hccontrol -n "$n" read_connection_list 2>/dev/null | grep -c ' OPEN')"
 elif [ -f /var/run/eclipse-bt.off ]; then
     echo 'btoff=1'
 fi
@@ -367,7 +367,13 @@ async fn run(script: &str) -> Option<String> {
         gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_SILENCE,
     )
     .ok()?;
-    let (stdout, _) = process.communicate_utf8_future(None).await.ok()?;
+    // A wedged tool would otherwise freeze the bar, and the battery
+    // warnings with it; each command has its own timeout, and this backstops.
+    let Ok(result) = glib::future_with_timeout(Duration::from_secs(8), process.communicate_utf8_future(None)).await else {
+        process.force_exit();
+        return None;
+    };
+    let (stdout, _) = result.ok()?;
     stdout.map(String::from)
 }
 
