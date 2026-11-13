@@ -273,6 +273,20 @@ pub fn start() {
     );
 }
 
+/// Posts a notification from the shell itself, replacing `replaces` if it's
+/// still around; returns its id.
+pub fn post(replaces: u32, summary: &str, body: &str, icon: &str, urgency: Urgency) -> u32 {
+    let level: u8 = match urgency {
+        Urgency::Low => 0,
+        Urgency::Normal => 1,
+        Urgency::Critical => 2,
+    };
+    let hints = glib::VariantDict::new(None);
+    hints.insert("urgency", level);
+    let params = ("eclipse-shell", replaces, icon, summary, body, Vec::<String>::new(), hints.end(), -1i32).to_variant();
+    notify(&params)
+}
+
 fn notify(params: &glib::Variant) -> u32 {
     let text = |i: usize| params.child_value(i).str().unwrap_or_default().to_owned();
     let (app, replaces, app_icon, summary, body) = (text(0), params.child_value(1).get::<u32>().unwrap_or(0), text(2), text(3), text(4));

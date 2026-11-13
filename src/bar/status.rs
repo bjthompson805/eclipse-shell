@@ -190,6 +190,7 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
                 if let Some(text) = run(READ).await {
                     *reading.borrow_mut() = parse(&text);
                     paint();
+                    warn_battery(reading.borrow().battery);
                 }
                 let tick = glib::timeout_future(POLL);
                 let woken = wakeups.recv();
@@ -220,6 +221,39 @@ pub fn status(s: f64, actions: &super::Actions) -> gtk::Box {
         }
     });
     row
+}
+
+thread_local! {
+    /// The level last warned about (0 none, 1 low, 2 critical) and that
+    /// warning's notification; shared, since every monitor's bar polls.
+    static WARNED: std::cell::Cell<(u8, u32)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Warns once on falling to 20%, again at 5%; plugging in resets it.
+fn warn_battery(battery: Option<Battery>) {
+    use crate::notifications::{self, Urgency};
+    let Some(b) = battery else { return };
+    let level = match b.percent {
+        _ if b.charging => 0,
+        p if p <= 5 => 2,
+        p if p <= 20 => 1,
+        _ => 0,
+    };
+    WARNED.with(|w| {
+        let (warned, id) = w.get();
+        if level <= warned {
+            if level < warned {
+                w.set((level, id));
+            }
+            return;
+        }
+        let id = if level == 2 {
+            notifications::post(id, "Battery critically low", &format!("{}% left. Plug in now.", b.percent), "battery-caution", Urgency::Critical)
+        } else {
+            notifications::post(id, "Battery low", &format!("{}% left. Consider plugging in.", b.percent), "battery-low", Urgency::Normal)
+        };
+        w.set((level, id));
+    });
 }
 
 /// Unmutes and steps the default output's volume by 3%, up to 100%, then
