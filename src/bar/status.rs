@@ -250,7 +250,7 @@ fn warn_battery(battery: Option<Battery>) {
         let id = if level == 2 {
             notifications::post(id, "Battery critically low", &format!("{}% left. Plug in now.", b.percent), "battery-caution", Urgency::Critical)
         } else {
-            notifications::post(id, "Battery low", &format!("{}% left. Consider plugging in.", b.percent), "battery-low", Urgency::Normal)
+            notifications::post(id, "Battery low", &format!("{}% left. Consider plugging in.", b.percent), "battery-low", Urgency::Critical)
         };
         w.set((level, id));
     });
