@@ -281,9 +281,10 @@ pub fn post(replaces: u32, summary: &str, body: &str, icon: &str, urgency: Urgen
         Urgency::Normal => 1,
         Urgency::Critical => 2,
     };
-    let hints = glib::VariantDict::new(None);
-    hints.insert("urgency", level);
-    let params = ("eclipse-shell", replaces, icon, summary, body, Vec::<String>::new(), hints.end(), -1i32).to_variant();
+    // A map, not a VariantDict's end(): a Variant in a tuple boxes as "v",
+    // where notify wants "a{sv}".
+    let hints = std::collections::HashMap::from([("urgency".to_owned(), level.to_variant())]);
+    let params = ("eclipse-shell", replaces, icon, summary, body, Vec::<String>::new(), hints, -1i32).to_variant();
     notify(&params)
 }
 
