@@ -1,6 +1,6 @@
 //! The right sidebar: quick controls over a tabbed glance. A clock and the
 //! weather, quick toggles (Wi-Fi, Bluetooth, do not disturb, night light,
-//! microphone, airplane mode), volume and brightness faders, then a tab rail
+//! always on, microphone, airplane mode), volume and brightness faders, then a tab rail
 //! over notifications, the calendar, now playing and the forecast.
 //!
 //! The tab panes are the popouts' own cards, each popout built a second time
@@ -19,6 +19,7 @@ use gtk4 as gtk;
 use crate::calendar::Calendar;
 use crate::display_popout::{read_brightness, set_brightness, MIN_BRIGHTNESS};
 use crate::fader::{self, Fader};
+use crate::hint;
 use crate::inbox_popout::InboxPopout;
 use crate::media_popout::MediaPopout;
 use crate::popout::{self, Popout};
@@ -42,6 +43,8 @@ struct State {
     wifi: Option<bool>,
     bluetooth: Option<bool>,
     night: bool,
+    /// hypridle is stopped, so the screen never dims, locks or sleeps.
+    awake: bool,
     mic_muted: bool,
     volume: Option<(f64, bool)>,
 }
@@ -322,6 +325,12 @@ impl Controls {
         tiles.push(tile(s, if dnd { "do_not_disturb_on" } else { "do_not_disturb_off" }, "Do not disturb", dnd, act(Box::new(move || notifications::set_dnd(!dnd)))));
         let night = state.night;
         tiles.push(tile(s, "nightlight", "Night light", night, act(Box::new(move || set_night(!night)))));
+        let awake = state.awake;
+        let always = tile(s, "coffee", "Always on", awake, act(Box::new(move || set_awake(!awake))));
+        hint::float_below(&always, self.sidebar.hints(), s, move || {
+            hint::note(s, "Keeps the screen from dimming, locking, turning off or sleeping while idle.", 200.0)
+        });
+        tiles.push(always);
         let muted = state.mic_muted;
         tiles.push(tile(s, if muted { "mic_off" } else { "mic" }, if muted { "Mic muted" } else { "Microphone" }, !muted, act(Box::new(|| audio::spawn(&["wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"])))));
         if state.wifi.is_some() || state.bluetooth.is_some() {
@@ -461,9 +470,23 @@ fn read_state() -> State {
     State {
         wifi: wifi.iface.is_some().then_some(wifi.radio),
         bluetooth: bt.present.then_some(bt.enabled),
-        night: Command::new("pgrep").args(["-x", "hyprsunset"]).output().is_ok_and(|o| o.status.success()),
+        night: running("hyprsunset"),
+        awake: !running("hypridle"),
         mic_muted: volume("@DEFAULT_AUDIO_SOURCE@").is_some_and(|(_, m)| m),
         volume: volume("@DEFAULT_AUDIO_SINK@"),
+    }
+}
+
+fn running(name: &str) -> bool {
+    Command::new("pgrep").args(["-x", name]).output().is_ok_and(|o| o.status.success())
+}
+
+/// Always on stops hypridle outright; off starts it again.
+fn set_awake(on: bool) {
+    if on {
+        audio::spawn(&["pkill", "-x", "hypridle"]);
+    } else {
+        audio::spawn(&["hypridle"]);
     }
 }
 
