@@ -36,6 +36,9 @@ const POLL: Duration = Duration::from_secs(2);
 const SETTLE: Duration = Duration::from_millis(700);
 const HELPER: &str = "/usr/local/libexec/eclipse-priv";
 const NIGHT_TEMPERATURE: &str = "4500";
+/// Hyprland starts hypridle alongside the shell, so a remembered Always on
+/// keeps stopping it for this long after startup.
+const AWAKE_GRACE: Duration = Duration::from_secs(30);
 
 /// What the toggles show. `None`: there's no such radio.
 #[derive(Clone, Default, PartialEq)]
@@ -90,6 +93,7 @@ impl Controls {
             Pane { glyph: "partly_cloudy_day", name: "Weather", popout: p_weather, open: Box::new(move || weather.toggle(0.0)) },
         ];
 
+        restore_awake();
         let controls = Rc::new(Self {
             sidebar,
             panes,
@@ -481,13 +485,42 @@ fn running(name: &str) -> bool {
     Command::new("pgrep").args(["-x", name]).output().is_ok_and(|o| o.status.success())
 }
 
+/// Where Always on is remembered across logins: present while it's on.
+fn awake_path() -> std::path::PathBuf {
+    glib::user_state_dir().join("eclipse-shell").join("always-on")
+}
+
 /// Always on stops hypridle outright; off starts it again.
 fn set_awake(on: bool) {
+    let path = awake_path();
+    if on {
+        let _ = path.parent().map(std::fs::create_dir_all);
+        let _ = std::fs::write(&path, "");
+    } else {
+        let _ = std::fs::remove_file(&path);
+    }
     if on {
         audio::spawn(&["pkill", "-x", "hypridle"]);
     } else {
         audio::spawn(&["hypridle"]);
     }
+}
+
+/// Puts a remembered Always on back: stops hypridle each second until
+/// [`AWAKE_GRACE`] has passed, as it may start after the shell does.
+fn restore_awake() {
+    if !awake_path().exists() {
+        return;
+    }
+    let start = std::time::Instant::now();
+    glib::timeout_add_local(Duration::from_secs(1), move || {
+        // Turned off meanwhile: leave the hypridle it started alone.
+        if !awake_path().exists() {
+            return glib::ControlFlow::Break;
+        }
+        audio::spawn(&["pkill", "-x", "hypridle"]);
+        if start.elapsed() < AWAKE_GRACE { glib::ControlFlow::Continue } else { glib::ControlFlow::Break }
+    });
 }
 
 fn set_wifi(on: bool) {
