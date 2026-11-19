@@ -1,4 +1,4 @@
-//! Claude Code usage popout, dropping from the bar's usage readout: the
+//! Agent usage popout, dropping from the bar's usage readout: the
 //! plan, both rate-limit windows with when they reset, and the last week's
 //! tokens by day and by model. Rebuilt whenever the numbers change, and
 //! every few seconds while open so "ago" times stay current.
@@ -11,7 +11,7 @@ use gtk::prelude::*;
 use gtk::{cairo, gdk, glib, pango};
 use gtk4 as gtk;
 
-use crate::agent_usage::{self, format_tokens, Limit, Usage};
+use crate::agent_usage::{self, format_tokens, Limit, Pool, Provider, Usage};
 use crate::popout::{self, Anchor, Popout};
 use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, DIM, SUBTLE};
 
@@ -78,10 +78,18 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
         .build();
     let now = glib::real_time() / 1_000_000;
 
+    let provider = agent_usage::provider();
+    let tabs = gtk::Box::new(gtk::Orientation::Horizontal, px(4.0));
+    tabs.set_homogeneous(true);
+    for (choice, label) in [(Provider::Claude, "Claude"), (Provider::Codex, "Codex"), (Provider::Antigravity, "AGY")] {
+        tabs.append(&selection_button(label, provider == choice, move || agent_usage::select_provider(choice)));
+    }
+    column.append(&tabs);
+
     // Header: sparkle, provider, plan, and a refresh button.
     let header = gtk::Box::new(gtk::Orientation::Horizontal, px(8.0));
     header.append(&theme::filled_icon_glyph("auto_awesome", 16.0 * s, theme::palette().accent));
-    header.append(&TextStyle::new(10.0 * s, pango::Weight::Semibold, SUBTLE).tracking(1.6 * s).label("CLAUDE CODE"));
+    header.append(&TextStyle::new(10.0 * s, pango::Weight::Semibold, SUBTLE).tracking(1.6 * s).label(&provider.name().to_uppercase()));
     let plan = TextStyle::new(10.0 * s, pango::Weight::Medium, DIM).label(&usage.plan);
     plan.set_hexpand(true);
     plan.set_xalign(0.0);
@@ -95,6 +103,15 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
         column.append(&label);
     }
 
+    if provider == Provider::Antigravity {
+        let pools = gtk::Box::new(gtk::Orientation::Horizontal, px(4.0));
+        pools.set_homogeneous(true);
+        for (choice, label) in [(Pool::Gemini, "Gemini"), (Pool::ClaudeGpt, "Claude & GPT")] {
+            pools.append(&selection_button(label, agent_usage::pool() == choice, move || agent_usage::select_pool(choice)));
+        }
+        column.append(&pools);
+    }
+
     let have_limits = usage.session.is_some() || usage.weekly.is_some();
     if have_limits {
         let limits = section(s, "Limits", 12.0);
@@ -104,6 +121,10 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
             }
         }
         column.append(&limits);
+    }
+    if !have_limits && usage.problem.is_none() {
+        let status = if usage.refreshing { "Checking usage…" } else { "Usage unavailable for this selection." };
+        column.append(&small(s, DIM).label(status));
     }
     if let Some(problem) = &usage.problem {
         let color = if have_limits { theme::palette().accent_lit } else { DIM };
@@ -117,7 +138,8 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
 
     if !usage.days.is_empty() {
         column.append(&popout::divider());
-        let days = section(s, "Tokens by day", 8.0);
+        let title = if provider == Provider::Antigravity { "Estimated tokens by day" } else { "Tokens by day" };
+        let days = section(s, title, 8.0);
         let peak = usage.days.iter().map(|(_, t)| *t).max().unwrap_or(1).max(1);
         let today = glib::DateTime::now_local().ok().and_then(|d| d.format("%Y-%m-%d").ok()).map(String::from).unwrap_or_default();
         for (day, tokens) in &usage.days {
@@ -128,7 +150,8 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
 
     if !usage.models.is_empty() {
         column.append(&popout::divider());
-        let models = section(s, "Tokens by model", 6.0);
+        let title = if provider == Provider::Antigravity { "Estimated tokens by model" } else { "Tokens by model" };
+        let models = section(s, title, 6.0);
         let top = usage.models[0].1.max(1);
         for (name, tokens) in &usage.models {
             models.append(&model_row(s, name, *tokens, *tokens as f64 / top as f64));
@@ -136,6 +159,17 @@ fn body(s: f64, usage: &Usage) -> gtk::Box {
         column.append(&models);
     }
     column
+}
+
+fn selection_button(label: &str, selected: bool, select: impl Fn() + 'static) -> gtk::Button {
+    let button = gtk::Button::with_label(label);
+    if selected {
+        button.set_state_flags(gtk::StateFlags::CHECKED, false);
+    } else {
+        button.add_css_class("flat");
+        button.connect_clicked(move |_| select());
+    }
+    button
 }
 
 fn small(s: f64, color: Rgba) -> TextStyle {

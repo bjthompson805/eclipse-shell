@@ -37,7 +37,7 @@ pub struct Settings {
 
     /// Show the CPU, memory and temperature readout.
     pub bar_stats: bool,
-    /// Show Claude Code's five-hour rate-limit usage.
+    /// Show the selected agent's five-hour rate-limit usage.
     pub bar_agent_usage: bool,
     /// Show download and upload speed.
     pub bar_net_speed: bool,

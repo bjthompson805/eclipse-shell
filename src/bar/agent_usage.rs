@@ -1,4 +1,4 @@
-//! Claude Code rate-limit readout: a sparkle and the five-hour window's
+//! Selected agent rate-limit readout: a sparkle and the five-hour window's
 //! usage, tinted with the accent past 80%.
 
 use gtk::pango;
@@ -17,12 +17,18 @@ pub fn agent_usage(s: f64) -> gtk::Box {
     row.append(&glyph);
     row.append(&value);
 
-    let paint = move || {
-        let percent = agent_usage::current().session.map(|l| l.percent);
-        let color = if percent.is_some_and(|p| p > WARN_ABOVE) { theme::palette().accent_lit } else { SUBTLE };
-        glyph.set_attributes(theme::filled_icon_glyph("auto_awesome", 15.0 * s, color).attributes().as_ref());
-        value.set_text(&percent.map_or("\u{2013}".into(), |p| format!("{p}%")));
-        TextStyle::new(9.5 * s, pango::Weight::Medium, color).apply(&value);
+    let paint = {
+        let row = row.downgrade();
+        move || {
+            if let Some(row) = row.upgrade() {
+                row.set_tooltip_text(Some(agent_usage::provider().name()));
+            }
+            let percent = agent_usage::current().session.map(|l| l.percent);
+            let color = if percent.is_some_and(|p| p > WARN_ABOVE) { theme::palette().accent_lit } else { SUBTLE };
+            glyph.set_attributes(theme::filled_icon_glyph("auto_awesome", 15.0 * s, color).attributes().as_ref());
+            value.set_text(&percent.map_or("\u{2013}".into(), |p| format!("{p}%")));
+            TextStyle::new(9.5 * s, pango::Weight::Medium, color).apply(&value);
+        }
     };
     paint();
     theme::on_palette_change(paint.clone());

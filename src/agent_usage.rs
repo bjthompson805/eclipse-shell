@@ -1,34 +1,29 @@
-//! Claude Code usage: the rate-limit windows from Anthropic's usage
-//! endpoint, and token counts from Claude Code's local transcripts.
-//!
-//! The limits come from the OAuth token in Claude Code's credentials file,
-//! checked every two minutes (the endpoint rate-limits anything faster). The
-//! token goes to curl on stdin so it never shows in `ps`. A failed check
-//! keeps the last good reading. Token counts are summed from the last eight
-//! days of transcripts on a worker thread, per day and per model, counting
-//! each message once.
+//! Agent quota and local token usage for the bar and popout.
 
-use std::cell::RefCell;
+mod providers;
+
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use gtk::{gio, glib};
 use gtk4 as gtk;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const POLL: Duration = Duration::from_secs(120);
 const ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 const SCAN_DAYS: u64 = 8;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Limit {
     pub percent: u32,
     /// Unix seconds, when known.
     pub resets_at: Option<i64>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Usage {
     pub session: Option<Limit>,
     pub weekly: Option<Limit>,
@@ -39,69 +34,227 @@ pub struct Usage {
     pub checked_at: Option<i64>,
     /// Why the last check gave nothing, if it didn't.
     pub problem: Option<String>,
+    #[serde(skip)]
     pub refreshing: bool,
+    partner: WindowsPair,
     /// Tokens per local day ("2026-11-11"), oldest first.
     pub days: Vec<(String, u64)>,
     /// Tokens per model, largest first.
     pub models: Vec<(String, u64)>,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provider {
+    #[default]
+    Claude,
+    Codex,
+    Antigravity,
+}
+
+impl Provider {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Codex => "Codex",
+            Self::Antigravity => "Antigravity",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pool {
+    #[default]
+    Gemini,
+    ClaudeGpt,
+}
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+struct Selection {
+    provider: Provider,
+    pool: Pool,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct Readings {
+    claude: Usage,
+    codex: Usage,
+    antigravity: Usage,
+}
+
+impl Readings {
+    fn get_mut(&mut self, provider: Provider) -> &mut Usage {
+        match provider {
+            Provider::Claude => &mut self.claude,
+            Provider::Codex => &mut self.codex,
+            Provider::Antigravity => &mut self.antigravity,
+        }
+    }
+}
+
 thread_local! {
-    static USAGE: RefCell<Usage> = RefCell::default();
+    static SELECTION: Cell<Selection> = Cell::new(load_state("agent-usage-selection.json"));
+    static READINGS: RefCell<Readings> = RefCell::new(load_state("agent-usage-cache.json"));
     static LISTENERS: RefCell<Vec<Box<dyn Fn()>>> = RefCell::default();
-    static WAKE: RefCell<Option<async_channel::Sender<()>>> = RefCell::default();
+    static WAKE: RefCell<Option<async_channel::Sender<bool>>> = RefCell::default();
+}
+
+fn state_dir() -> PathBuf {
+    glib::user_state_dir().join("eclipse-shell")
+}
+
+fn load_state<T: serde::de::DeserializeOwned + Default>(file: &str) -> T {
+    std::fs::read(state_dir().join(file)).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default()
+}
+
+fn save_state(file: &str, value: &impl Serialize) {
+    let dir = state_dir();
+    let path = dir.join(file);
+    if let Err(error) = std::fs::create_dir_all(&dir).and_then(|_| {
+        glib::file_set_contents(&path, &serde_json::to_vec(value)?).map_err(std::io::Error::other)
+    }) {
+        eprintln!("Could not save agent usage state: {error}");
+    }
+}
+
+pub fn provider() -> Provider {
+    SELECTION.with(|s| s.get().provider)
+}
+
+pub fn pool() -> Pool {
+    SELECTION.with(|s| s.get().pool)
+}
+
+pub fn select_provider(provider: Provider) {
+    SELECTION.with(|s| {
+        let selection = Selection { provider, ..s.get() };
+        s.set(selection);
+        save_state("agent-usage-selection.json", &selection);
+    });
+    notify();
+    wake(false);
+}
+
+pub fn select_pool(pool: Pool) {
+    SELECTION.with(|s| {
+        let selection = Selection { pool, ..s.get() };
+        s.set(selection);
+        save_state("agent-usage-selection.json", &selection);
+    });
+    notify();
 }
 
 pub fn current() -> Usage {
-    USAGE.with(|u| u.borrow().clone())
+    READINGS.with(|r| {
+        let mut usage = r.borrow_mut().get_mut(provider()).clone();
+        if provider() == Provider::Antigravity && pool() == Pool::ClaudeGpt {
+            (usage.session, usage.weekly) = usage.partner;
+        }
+        usage
+    })
 }
 
 pub fn on_change(f: impl Fn() + 'static) {
     LISTENERS.with(|l| l.borrow_mut().push(Box::new(f)));
 }
 
-fn update(f: impl FnOnce(&mut Usage)) {
-    USAGE.with(|u| f(&mut u.borrow_mut()));
+fn notify() {
     LISTENERS.with(|l| l.borrow().iter().for_each(|f| f()));
 }
 
-/// Checks again now rather than at the next tick.
-pub fn refresh_now() {
+fn update(provider: Provider, f: impl FnOnce(&mut Usage)) {
+    READINGS.with(|r| f(r.borrow_mut().get_mut(provider)));
+    if provider == self::provider() {
+        notify();
+    }
+}
+
+fn wake(force: bool) {
     WAKE.with(|w| {
         if let Some(wake) = w.borrow().as_ref() {
-            let _ = wake.try_send(());
+            let _ = wake.try_send(force);
         }
     });
 }
 
+pub fn refresh_now() {
+    wake(true);
+}
+
+type WindowsPair = (Option<Limit>, Option<Limit>);
+type TokenStats = (Vec<(String, u64)>, Vec<(String, u64)>);
+
+#[derive(Default)]
+struct Quota {
+    limits: WindowsPair,
+    partner: WindowsPair,
+    plan: String,
+}
+
 pub fn start() {
-    let (wake, woken) = async_channel::unbounded::<()>();
+    let (wake, woken) = async_channel::unbounded::<bool>();
     WAKE.with(|w| *w.borrow_mut() = Some(wake));
     glib::spawn_future_local(async move {
+        let mut attempts = [None; 3];
+        let mut scans = [None; 3];
+        let mut force = false;
         loop {
-            update(|u| u.refreshing = true);
-            let now = glib::real_time() / 1_000_000;
-            let result = fetch_limits().await;
-            let stats = gio::spawn_blocking(scan_transcripts).await.unwrap_or_default();
-            update(|u| {
-                u.refreshing = false;
-                u.checked_at = Some(now);
-                u.days = stats.0;
-                u.models = stats.1;
-                match result {
-                    Ok((session, weekly, plan)) => {
-                        u.session = session.or(u.session);
-                        u.weekly = weekly.or(u.weekly);
-                        u.plan = plan;
-                        u.updated_at = Some(now);
-                        u.problem = None;
+            let selected = provider();
+            let index = selected as usize;
+            let interval = if force { Duration::from_secs(5) } else { POLL };
+            if attempts[index].is_none_or(|last: std::time::Instant| last.elapsed() >= interval) {
+                attempts[index] = Some(std::time::Instant::now());
+                update(selected, |u| u.refreshing = true);
+                let result = match selected {
+                    Provider::Claude => fetch_limits().await.map(|(session, weekly, plan)| Quota { limits: (session, weekly), plan, ..Quota::default() }),
+                    Provider::Codex => providers::codex_limits().await,
+                    Provider::Antigravity => providers::antigravity_limits().await,
+                };
+                let scan_interval = if selected == Provider::Claude { POLL } else { Duration::from_secs(900) };
+                let stats = if force || scans[index].is_none_or(|last: std::time::Instant| last.elapsed() >= scan_interval) {
+                    scans[index] = Some(std::time::Instant::now());
+                    gio::spawn_blocking(move || match selected {
+                        Provider::Claude => scan_transcripts(),
+                        _ => providers::scan_transcripts(selected),
+                    }).await.ok()
+                } else {
+                    None
+                };
+                let now = glib::real_time() / 1_000_000;
+                update(selected, |u| {
+                    u.refreshing = false;
+                    u.checked_at = Some(now);
+                    if let Some((days, models)) = stats {
+                        u.days = days;
+                        u.models = models;
                     }
-                    Err(problem) => u.problem = Some(problem),
+                    match result {
+                        Ok(quota) => {
+                            u.session = quota.limits.0.or(u.session);
+                            u.weekly = quota.limits.1.or(u.weekly);
+                            u.partner.0 = quota.partner.0.or(u.partner.0);
+                            u.partner.1 = quota.partner.1.or(u.partner.1);
+                            u.plan = quota.plan;
+                            u.updated_at = Some(now);
+                            u.problem = None;
+                        }
+                        Err(problem) => u.problem = Some(problem),
+                    }
+                });
+                READINGS.with(|r| save_state("agent-usage-cache.json", &*r.borrow()));
+            }
+            if selected != provider() {
+                continue;
+            }
+            let remaining = POLL.saturating_sub(attempts[index].unwrap().elapsed());
+            force = false;
+            crate::bar::first_of(glib::timeout_future(remaining), async {
+                force = woken.recv().await.unwrap_or(false);
+                while let Ok(request) = woken.try_recv() {
+                    force |= request;
                 }
-            });
-            let tick = glib::timeout_future(POLL);
-            let nudged = woken.recv();
-            crate::bar::first_of(tick, nudged).await;
+            }).await;
         }
     });
 }

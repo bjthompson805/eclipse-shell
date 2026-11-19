@@ -154,7 +154,7 @@ fn rows() -> Vec<Row> {
     let row = |page, label, note, control| Row { page, label, note, control };
     vec![
         row(Bar, "System stats", "CPU, memory and temperature.", switch!(bar_stats)),
-        row(Bar, "Claude usage", "Claude Code's five-hour rate-limit usage.", switch!(bar_agent_usage)),
+        row(Bar, "Agent usage", "Five-hour rate-limit usage for Claude Code, Codex, or Antigravity.", switch!(bar_agent_usage)),
         row(Bar, "Network speed", "Download and upload rates.", switch!(bar_net_speed)),
         row(Bar, "Status glyphs", "Volume, brightness, network, Bluetooth and battery.", switch!(bar_status)),
         row(Bar, "Weather", "The current conditions, from the weather location.", switch!(bar_weather)),
