@@ -9,7 +9,7 @@
 //! rebuilt when what it shows changes; the seek line and volume move in place.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -70,10 +70,8 @@ pub struct MediaPopout {
     clock: Cell<Clock>,
     /// The track the clock is for.
     track: RefCell<String>,
-    /// The last artist and album lines (0 and 1) each player filled.
-    lines: RefCell<HashMap<(String, usize), String>>,
-    /// When the current track started showing.
-    track_since: Cell<Instant>,
+    /// Artist and album rows (0 and 1) each player has used.
+    lines: RefCell<HashSet<(String, usize)>>,
     /// When the player vanished; the card waits a moment to see whether it's back.
     gone: Cell<Option<Instant>>,
     seek: RefCell<Option<Rc<Seek>>>,
@@ -102,7 +100,6 @@ impl MediaPopout {
             track: RefCell::default(),
             gone: Cell::new(None),
             lines: RefCell::default(),
-            track_since: Cell::new(Instant::now()),
             seek: RefCell::default(),
             volume: RefCell::default(),
             stream: RefCell::default(),
@@ -214,7 +211,6 @@ impl MediaPopout {
             if *self.track.borrow() != track {
                 // A new track starts from the top until the player says otherwise.
                 *self.track.borrow_mut() = track;
-                self.track_since.set(Instant::now());
                 self.clock.set(Clock { at: Duration::ZERO, since: Instant::now(), running: p.playing });
                 let popout = self.clone();
                 glib::spawn_future_local(async move { popout.sync().await });
@@ -296,44 +292,23 @@ impl MediaPopout {
         title.set_wrap_mode(pango::WrapMode::WordChar);
         title.set_lines(2);
         text.append(&title);
-        // Players send a new track's details in pieces, and may blank a line
-        // before sending it again. Just after a change, an empty line keeps
-        // what it said; after that, a line this player has filled before
-        // keeps its room, so the card holds still.
-        let settling = self.track_since.get().elapsed() < GONE_AFTER;
+        // Reserve the height of rows this player has used so the card holds still.
         let mut lines = self.lines.borrow_mut();
-        let mut held = false;
         for (i, (line, color)) in [(&player.artists, SUBTLE), (&player.album, FAINT)].into_iter().enumerate() {
             let key = (player.name.clone(), i);
             let shown = if !line.is_empty() {
-                lines.insert(key, line.clone());
-                line.clone()
+                lines.insert(key);
+                line.as_str()
+            } else if lines.contains(&key) {
+                " "
             } else {
-                match lines.get(&key) {
-                    Some(last) if settling => {
-                        held = true;
-                        last.clone()
-                    }
-                    // A space keeps an empty line its height.
-                    Some(_) => " ".to_owned(),
-                    None => continue,
-                }
+                continue;
             };
-            let label = TextStyle::new(11.0 * s, pango::Weight::Medium, color).label(&shown);
+            let label = TextStyle::new(11.0 * s, pango::Weight::Medium, color).label(shown);
             popout::fill(&label);
             text.append(&label);
         }
         drop(lines);
-        if held {
-            // Look again once the wait is over, in case the line stays empty.
-            let popout = Rc::downgrade(self);
-            glib::timeout_add_local_once(GONE_AFTER, move || {
-                if let Some(p) = popout.upgrade().filter(|p| p.popout.is_open()) {
-                    p.shape.borrow_mut().clear();
-                    p.update();
-                }
-            });
-        }
         head.append(&text);
         column.append(&head);
 
@@ -500,8 +475,8 @@ fn shape(player: Option<&Player>, players: &[Player], stream: Option<u32>) -> St
     let names: Vec<&str> = players.iter().map(|p| p.name.as_str()).collect();
     let Some(p) = player else { return format!("none {names:?}") };
     format!(
-        "{} {} {} {} {} {} {} {:?} {} {} {} {:?} {:?} {names:?} {stream:?}",
-        p.name, p.title, p.artists, p.album, p.art_url, p.identity, p.playing, p.length, p.can_previous, p.can_next, p.can_seek, p.shuffle, p.repeat
+        "{} {} {} {} {} {} {} {} {:?} {} {} {} {:?} {:?} {names:?} {stream:?}",
+        p.name, p.track_id, p.title, p.artists, p.album, p.art_url, p.identity, p.playing, p.length, p.can_previous, p.can_next, p.can_seek, p.shuffle, p.repeat
     )
 }
 
