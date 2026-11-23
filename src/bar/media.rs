@@ -48,7 +48,7 @@ pub fn media(s: f64) -> gtk::Box {
             pangocairo::functions::show_layout(cr, &layout);
         }
     });
-    slide(&title, &layout, &offset, &playing);
+    let kick = slide(&title, &layout, &offset, &playing);
 
     let shown_art = Rc::new(RefCell::new(String::new()));
     let paint = {
@@ -66,6 +66,7 @@ pub fn media(s: f64) -> gtk::Box {
             let width = f64::from(logical.width()).min(MAX_TITLE * s);
             title.set_size_request(width.ceil() as i32 + 2, logical.height());
             title.queue_draw();
+            kick();
 
             let (name, color) = if player.playing { ("play_arrow", theme::palette().accent) } else { ("pause", DIM) };
             state.set_text(name);
@@ -90,41 +91,58 @@ pub fn toggle() {
 }
 
 /// Ping-pongs the line: hold at the start, slide to the end, hold, slide
-/// back. Rests at the start whenever playback stops.
-fn slide(area: &gtk::DrawingArea, layout: &pango::Layout, offset: &Rc<Cell<f64>>, playing: &Rc<Cell<bool>>) {
-    let (layout, offset, playing) = (layout.clone(), offset.clone(), playing.clone());
-    let start = Cell::new(None::<f64>);
-    area.add_tick_callback(move |area, clock| {
-        let overflow = f64::from(layout.pixel_extents().1.width()) - f64::from(area.width()) + 2.0;
-        if !playing.get() || overflow <= 0.0 {
-            start.set(None);
-            if offset.get() != 0.0 {
+/// back. Rests at the start whenever playback stops. The frame callback only
+/// runs while there is something to slide, so a paused bar stays idle; call
+/// the returned closure whenever the track or play state changes.
+fn slide(area: &gtk::DrawingArea, layout: &pango::Layout, offset: &Rc<Cell<f64>>, playing: &Rc<Cell<bool>>) -> impl Fn() + use<> {
+    let running = Rc::new(Cell::new(false));
+    let (area, layout, offset, playing) = (area.downgrade(), layout.clone(), offset.clone(), playing.clone());
+    move || {
+        let Some(area) = area.upgrade() else { return };
+        if running.get() || !playing.get() {
+            if !playing.get() && offset.get() != 0.0 {
                 offset.set(0.0);
                 area.queue_draw();
             }
-            return glib::ControlFlow::Continue;
+            return;
         }
-        let now = clock.frame_time() as f64 / 1000.0;
-        let t = now - start.get().unwrap_or(now);
-        if start.get().is_none() {
-            start.set(Some(now));
-        }
-        let travel = overflow * MS_PER_PX;
-        let cycle = 2.0 * (HOLD_MS + travel);
-        let phase = t % cycle;
-        let x = if phase < HOLD_MS {
-            0.0
-        } else if phase < HOLD_MS + travel {
-            (phase - HOLD_MS) / travel
-        } else if phase < 2.0 * HOLD_MS + travel {
-            1.0
-        } else {
-            1.0 - (phase - 2.0 * HOLD_MS - travel) / travel
-        };
-        offset.set(x * overflow);
-        area.queue_draw();
-        glib::ControlFlow::Continue
-    });
+        running.set(true);
+        let (layout, offset, playing, running) = (layout.clone(), offset.clone(), playing.clone(), running.clone());
+        let start = Cell::new(None::<f64>);
+        area.add_tick_callback(move |area, clock| {
+            let overflow = f64::from(layout.pixel_extents().1.width()) - f64::from(area.width()) + 2.0;
+            if !playing.get() || overflow <= 0.0 {
+                running.set(false);
+                if offset.get() != 0.0 {
+                    offset.set(0.0);
+                    area.queue_draw();
+                }
+                return glib::ControlFlow::Break;
+            }
+            let now = clock.frame_time() as f64 / 1000.0;
+            let t = now - start.get().unwrap_or(now);
+            if start.get().is_none() {
+                start.set(Some(now));
+            }
+            let travel = overflow * MS_PER_PX;
+            let cycle = 2.0 * (HOLD_MS + travel);
+            let phase = t % cycle;
+            let x = if phase < HOLD_MS {
+                0.0
+            } else if phase < HOLD_MS + travel {
+                (phase - HOLD_MS) / travel
+            } else if phase < 2.0 * HOLD_MS + travel {
+                1.0
+            } else {
+                1.0 - (phase - 2.0 * HOLD_MS - travel) / travel
+            };
+            if offset.get() != x * overflow {
+                offset.set(x * overflow);
+                area.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        });
+    }
 }
 
 /// A circle with the cover art cropped to fill it, or a note while there

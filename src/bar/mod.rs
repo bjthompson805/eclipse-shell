@@ -100,8 +100,16 @@ impl Bar {
         }
         reserve.set_exclusive_zone(top.round() as i32);
         reserve.set_default_size(0, 0);
-        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        // It must draw something, however clear: a surface GTK never gives a
+        // buffer reads to Hyprland as unmapped, so every commit drew a fresh
+        // configure, and the two ping-ponged at the full frame rate.
+        let spacer = gtk::DrawingArea::new();
         spacer.set_size_request(-1, top.round() as i32);
+        spacer.set_draw_func(|_, cr, _, _| {
+            cr.set_operator(cairo::Operator::Source);
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+            let _ = cr.paint();
+        });
         reserve.set_child(Some(&spacer));
         // It only reserves space; clicks fall through to the frame above it.
         reserve.connect_realize(|w| set_input_rect(w, 0, 0));

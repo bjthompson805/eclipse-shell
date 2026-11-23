@@ -36,8 +36,8 @@ if [ -n "$n" ]; then
 elif [ -f /var/run/eclipse-bt.off ]; then
     echo 'btoff=1'
 fi
-printf 'powerd=%s\n' "$(sysrc -n powerd_enable 2>/dev/null)"
-printf 'pflags=%s\n' "$(sysrc -n powerd_flags 2>/dev/null)"
+# Sourced as rc does: sysrc would fork a dozen helpers every poll.
+(. /etc/defaults/rc.conf && source_rc_confs; printf 'powerd=%s\npflags=%s\n' "$powerd_enable" "$powerd_flags") 2>/dev/null
 sysctl -i hw.acpi.battery.units hw.acpi.battery.life hw.acpi.battery.state
 "#;
 
