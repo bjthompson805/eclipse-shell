@@ -179,6 +179,7 @@ fn rows() -> Vec<Row> {
         row(Clock, "24-hour clock", "13:00 rather than 1:00 PM.", switch!(clock_24h)),
         row(Clock, "Seconds", "Seconds on the bar's clock.", switch!(clock_seconds)),
         row(Clock, "Weather location", "\"Town, Region\". Leave it empty to locate by IP address.", text!(weather_location, "Located by IP address")),
+        row(Clock, "Fahrenheit", "Temperatures in °F and wind in mph, rather than °C and km/h.", switch!(weather_fahrenheit)),
         row(Fonts, "Scale", "Everything the shell draws, on top of each monitor's scale.", number!(font_scale, 70.0, 160.0, 100.0, percent)),
         row(Fonts, "Font", "For text.", text!(font, "JetBrainsMono Nerd Font")),
         row(Fonts, "Mono font", "For numbers and labels in caps.", text!(mono_font, "JetBrainsMono Nerd Font")),

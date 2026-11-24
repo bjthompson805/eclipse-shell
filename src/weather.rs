@@ -380,6 +380,11 @@ fn seconds_of_day(time: &str) -> Option<i32> {
 
 /// The US and a couple of others measure in Fahrenheit; go by the locale.
 fn uses_fahrenheit() -> bool {
+    config::get().weather_fahrenheit
+}
+
+/// The default for `weather_fahrenheit`: the locale's measurement region.
+pub fn locale_uses_fahrenheit() -> bool {
     let locale = ["LC_MEASUREMENT", "LC_ALL", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|l| !l.is_empty())).unwrap_or_default();
     ["_US", "_LR", "_MM"].iter().any(|region| locale.contains(region))
 }

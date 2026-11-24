@@ -31,6 +31,8 @@ pub struct Settings {
     pub launcher_weather: bool,
     /// "Town, Region" for the weather; empty locates by IP address instead.
     pub weather_location: String,
+    /// Temperatures in °F (and wind in mph) rather than °C and km/h.
+    pub weather_fahrenheit: bool,
 
     pub clock_24h: bool,
     pub clock_seconds: bool,
@@ -77,6 +79,7 @@ impl Default for Settings {
             launcher_greeting: true,
             launcher_weather: true,
             weather_location: "Sisters, Oregon".into(),
+            weather_fahrenheit: crate::weather::locale_uses_fahrenheit(),
             clock_24h: false,
             clock_seconds: true,
             bar_stats: true,
