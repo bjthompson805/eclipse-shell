@@ -34,7 +34,7 @@ if command -v doas >/dev/null 2>&1; then as_root=doas; else as_root=sudo; fi
 
 # ---- packages ----------------------------------------------------------------
 
-packages="gtk4 gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks"
+packages="gtk4 adwaita-icon-theme gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks"
 if [ $system -eq 1 ]; then
 	# Ask for the password once, up front, so a missing tty fails here.
 	if [ "$as_root" = sudo ] && ! sudo -v; then
@@ -62,6 +62,22 @@ if ! fc-list 'Material Symbols Rounded' family | grep -q .; then
 		'https://raw.githubusercontent.com/google/material-design-icons/master/variablefont/MaterialSymbolsRounded%5BFILL,GRAD,opsz,wght%5D.ttf' ||
 		say "could not fetch Material Symbols Rounded; glyphs will be missing"
 	fc-cache -f "$fonts" >/dev/null 2>&1 || :
+fi
+
+# ---- cursor theme ------------------------------------------------------------
+
+# With no "default" cursor theme Hyprland draws its built-in arrow for every
+# shape, so clickable widgets never show a pointer. This theme keeps that
+# arrow (data/cursors/default, its pixels from Hyprland's XCursorManager.cpp)
+# and takes the other shapes from Adwaita. A theme already there is left alone.
+cursors="$HOME/.local/share/icons/default"
+if [ ! -e "$cursors/index.theme" ]; then
+	mkdir -p "$cursors/cursors"
+	printf '[Icon Theme]\nName=default\nComment=Hyprland arrow, Adwaita shapes\nInherits=Adwaita\n' >"$cursors/index.theme"
+	cp "$repo/data/cursors/default" "$cursors/cursors/default"
+	for n in left_ptr arrow top_left_arrow; do
+		ln -sf default "$cursors/cursors/$n"
+	done
 fi
 
 # ---- the shell ---------------------------------------------------------------
