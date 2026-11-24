@@ -1,11 +1,13 @@
 //! What the hub changes in Hyprland: options, read live with `getoption`
-//! and evaluated at once, and commands to start at login. They're kept in
-//! `~/.config/eclipse-shell/hyprland.json` and `startup.json`, and
-//! written out as `~/.config/hypr/eclipse.lua`, which hyprland.lua loads last.
+//! and evaluated at once, commands to start at login, and window rules.
+//! They're kept in `~/.config/eclipse-shell/hyprland.json`, `startup.json`
+//! and `window_rules.json`, and written out as `~/.config/hypr/eclipse.lua`,
+//! which hyprland.lua loads last.
 
 use std::path::PathBuf;
 
 use gtk4::glib;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::hyprland;
@@ -16,6 +18,71 @@ fn overrides_path() -> PathBuf {
 
 fn startup_path() -> PathBuf {
     glib::user_config_dir().join("eclipse-shell").join("startup.json")
+}
+
+fn rules_path() -> PathBuf {
+    glib::user_config_dir().join("eclipse-shell").join("window_rules.json")
+}
+
+/// How windows matching `class` and `title` (regexes; either may be empty)
+/// open. Empty `size` ("1200x800") and `workspace` leave those alone.
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Rule {
+    pub class: String,
+    pub title: String,
+    pub float: bool,
+    pub center: bool,
+    pub pin: bool,
+    pub size: String,
+    pub workspace: String,
+}
+
+impl Rule {
+    /// `size` as a width and height, when it reads as one.
+    fn dimensions(&self) -> Option<(u32, u32)> {
+        let (w, h) = self.size.trim().split_once(['x', 'X', '×', ' '])?;
+        Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+    }
+
+    /// The rule as an `hl.window_rule` call, or none while it matches
+    /// nothing or does nothing.
+    fn lua(&self, n: usize) -> Option<String> {
+        let mut matching = Vec::new();
+        for (key, value) in [("class", &self.class), ("title", &self.title)] {
+            if !value.trim().is_empty() {
+                matching.push(format!("{key} = {:?}", value.trim()));
+            }
+        }
+        let mut effects = Vec::new();
+        for (key, on) in [("float", self.float), ("center", self.center), ("pin", self.pin)] {
+            if on {
+                effects.push(format!("{key} = true"));
+            }
+        }
+        if let Some((w, h)) = self.dimensions() {
+            effects.push(format!("size = {{ {w}, {h} }}"));
+        }
+        if !self.workspace.trim().is_empty() {
+            effects.push(format!("workspace = {:?}", self.workspace.trim()));
+        }
+        if matching.is_empty() || effects.is_empty() {
+            return None;
+        }
+        Some(format!("hl.window_rule({{ name = \"eclipse-rule-{n}\", match = {{ {} }}, {} }})\n", matching.join(", "), effects.join(", ")))
+    }
+}
+
+/// The window rules added in the hub.
+pub fn rules() -> Vec<Rule> {
+    std::fs::read_to_string(rules_path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// Saves `rules` and reloads, so they apply to windows opened from now on;
+/// a reload is the only way to drop a rule Hyprland already has.
+pub fn set_rules(rules: &[Rule]) {
+    save_all(&overrides(), &startup(), rules);
+    let _ = hyprland::request("reload config-only");
 }
 
 fn lua_path() -> PathBuf {
@@ -72,13 +139,23 @@ pub fn run(command: &str) {
 }
 
 fn save(all: &Map<String, Value>, commands: &[String]) {
+    save_all(all, commands, &rules());
+}
+
+fn save_all(all: &Map<String, Value>, commands: &[String], rules: &[Rule]) {
     let path = overrides_path();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let _ = std::fs::write(&path, serde_json::to_string_pretty(all).unwrap_or_default() + "\n");
     let _ = std::fs::write(startup_path(), serde_json::to_string_pretty(commands).unwrap_or_default() + "\n");
-    let _ = std::fs::write(lua_path(), lua(all, commands));
+    let _ = std::fs::write(rules_path(), serde_json::to_string_pretty(rules).unwrap_or_default() + "\n");
+    let _ = std::fs::write(lua_path(), lua(all, commands) + &rules_lua(rules));
+}
+
+fn rules_lua(rules: &[Rule]) -> String {
+    let calls: String = rules.iter().enumerate().filter_map(|(i, r)| r.lua(i + 1)).collect();
+    if calls.is_empty() { calls } else { format!("\n{calls}") }
 }
 
 fn lua(all: &Map<String, Value>, commands: &[String]) -> String {
@@ -154,5 +231,17 @@ mod tests {
     fn startup_block() {
         let text = lua(&Map::new(), &["nm-applet".to_owned(), "sh -c \"a \\\"b\\\"\"".to_owned()]);
         assert!(text.contains("hl.on(\"hyprland.start\", function()\n    hl.exec_cmd(\"nm-applet\")\n    hl.exec_cmd(\"sh -c \\\"a \\\\\\\"b\\\\\\\"\\\"\")\nend)\n"));
+    }
+
+    #[test]
+    fn window_rules() {
+        let nautilus = Rule { class: "org.gnome.Nautilus".into(), float: true, center: true, size: "1500x850".into(), ..Rule::default() };
+        assert_eq!(nautilus.lua(1).unwrap(), "hl.window_rule({ name = \"eclipse-rule-1\", match = { class = \"org.gnome.Nautilus\" }, float = true, center = true, size = { 1500, 850 } })\n");
+        let pinned = Rule { title: " Picture-in-Picture ".into(), pin: true, workspace: "2".into(), size: "big".into(), ..Rule::default() };
+        assert_eq!(pinned.lua(2).unwrap(), "hl.window_rule({ name = \"eclipse-rule-2\", match = { title = \"Picture-in-Picture\" }, pin = true, workspace = \"2\" })\n");
+        // Matching nothing, or doing nothing, writes nothing.
+        assert!(Rule { float: true, ..Rule::default() }.lua(1).is_none());
+        assert!(Rule { class: "foot".into(), ..Rule::default() }.lua(1).is_none());
+        assert_eq!(rules_lua(&[Rule::default()]), "");
     }
 }

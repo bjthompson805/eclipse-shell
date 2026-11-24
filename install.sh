@@ -188,6 +188,13 @@ hl.bind("SUPER + comma",      hl.dsp.exec_cmd(shell .. " hub"))
 hl.bind("SUPER + K",          hl.dsp.exec_cmd(shell .. " hub keybinds"))
 hl.bind("SUPER + W",          hl.dsp.exec_cmd(shell .. " wallpaper-next"))
 hl.bind("SUPER + SHIFT + W",  hl.dsp.exec_cmd(shell .. " walls"))
+
+-- what the hub (Super + ,) changes in Hyprland: options, startup commands,
+-- window rules. it writes eclipse.lua on the first change; probe for it, as
+-- Hyprland shows even a pcall'd require of a missing module as a config error
+if package.searchpath == nil or package.searchpath("eclipse", package.path) then
+    pcall(require, "eclipse")
+end
 EOF
 		if [ -f "$hypr/hyprland.lua" ]; then
 			cp -p "$hypr/hyprland.lua" "$hypr/hyprland.lua.pre-eclipse"

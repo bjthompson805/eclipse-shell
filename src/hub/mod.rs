@@ -35,12 +35,13 @@ enum Page {
     Fonts,
     Windows,
     Input,
+    Rules,
     Startup,
     Keybinds,
 }
 
 impl Page {
-    const ALL: [Self; 9] = [Self::Bar, Self::Launcher, Self::Frame, Self::Clock, Self::Fonts, Self::Windows, Self::Input, Self::Startup, Self::Keybinds];
+    const ALL: [Self; 10] = [Self::Bar, Self::Launcher, Self::Frame, Self::Clock, Self::Fonts, Self::Windows, Self::Rules, Self::Input, Self::Startup, Self::Keybinds];
 
     fn name(self) -> &'static str {
         match self {
@@ -51,6 +52,7 @@ impl Page {
             Self::Fonts => "Fonts & scale",
             Self::Windows => "Windows",
             Self::Input => "Input",
+            Self::Rules => "Window rules",
             Self::Startup => "Startup",
             Self::Keybinds => "Keybinds",
         }
@@ -65,6 +67,7 @@ impl Page {
             Self::Fonts => "text_fields",
             Self::Windows => "select_window",
             Self::Input => "mouse",
+            Self::Rules => "rule",
             Self::Startup => "rocket_launch",
             Self::Keybinds => "keyboard",
         }
@@ -79,6 +82,7 @@ impl Page {
             Self::Fonts => "Typefaces, icons, and the size of everything.",
             Self::Windows => "How Hyprland lays out and draws windows. Changes apply at once.",
             Self::Input => "Focus, pointer, touchpad and keyboard. Changes apply at once.",
+            Self::Rules => "How an app's windows open: floating, centred, pinned, at a size or on a workspace. Rules apply to windows opened after the change.",
             Self::Startup => "What starts when you log in.",
             Self::Keybinds => "Every shortcut in your Hyprland config, read from binds.lua and user.lua.",
         }
@@ -208,8 +212,11 @@ fn rows() -> Vec<Row> {
 }
 
 pub fn run(args: &[String]) -> glib::ExitCode {
-    // `hub windows`, `hub keybinds`: the page whose name starts with the word.
-    let start = args.first().and_then(|a| Page::ALL.into_iter().find(|p| p.name().to_lowercase().starts_with(&a.to_lowercase()))).unwrap_or(Page::Bar);
+    // `hub windows`, `hub rules`: the page with a word in its name that starts with the argument.
+    let start = args
+        .first()
+        .and_then(|a| Page::ALL.into_iter().find(|p| p.name().to_lowercase().split_whitespace().any(|w| w.starts_with(&a.to_lowercase()))))
+        .unwrap_or(Page::Bar);
     let app = gtk::Application::builder().application_id(APP_ID).build();
     let shown: Rc<RefCell<Option<Rc<Hub>>>> = Rc::default();
     app.connect_activate(move |app| {
@@ -451,6 +458,8 @@ impl Hub {
                 self.show_binds(|_| true);
             } else if page == Page::Startup {
                 self.show_startup();
+            } else if page == Page::Rules {
+                self.show_rules();
             } else {
                 self.show_rows(|r| r.page == page);
             }
@@ -711,6 +720,136 @@ impl Hub {
         }
     }
 
+    fn show_rules(self: &Rc<Self>) {
+        let s = self.s;
+        let px = |v: f64| (v * s).round() as i32;
+        let line = || {
+            let line = gtk::Box::new(gtk::Orientation::Horizontal, px(12.0));
+            line.set_margin_start(px(16.0));
+            line.set_margin_end(px(12.0));
+            line.set_margin_top(px(8.0));
+            line.set_margin_bottom(px(8.0));
+            line
+        };
+        let rules = hypr::rules();
+        if rules.is_empty() {
+            self.content.append(&ui::note(s, "rule", "No rules yet. Pick an open app below, or add one by its class."));
+        }
+        for (i, rule) in rules.iter().enumerate() {
+            let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let top = line();
+            top.append(&self.rule_field(i, "apps", "Class, e.g. org.gnome.Nautilus", &rule.class, |r, v| r.class = v));
+            top.append(&self.rule_field(i, "title", "Title (optional)", &rule.title, |r, v| r.title = v));
+            let hub = Rc::downgrade(self);
+            top.append(&icon_button(s, "close", "Remove", move || {
+                let mut rules = hypr::rules();
+                if i < rules.len() {
+                    rules.remove(i);
+                    hypr::set_rules(&rules);
+                }
+                if let Some(hub) = hub.upgrade() {
+                    hub.show_content();
+                }
+            }));
+            list.append(&top);
+            list.append(&popout::divider());
+            let effects = line();
+            let toggles: [(&str, bool, fn(&mut hypr::Rule)); 3] = [
+                ("Float", rule.float, |r| r.float = !r.float),
+                ("Centre", rule.center, |r| r.center = !r.center),
+                ("Pin", rule.pin, |r| r.pin = !r.pin),
+            ];
+            for (label, on, flip) in toggles {
+                let name = TextStyle::new(10.5 * s, pango::Weight::Semibold, CREAM).label(label);
+                name.set_valign(gtk::Align::Center);
+                effects.append(&name);
+                let hub = Rc::downgrade(self);
+                let toggle = popout::switch(s, on, true, move || {
+                    let mut rules = hypr::rules();
+                    if let Some(rule) = rules.get_mut(i) {
+                        flip(rule);
+                        hypr::set_rules(&rules);
+                    }
+                    if let Some(hub) = hub.upgrade() {
+                        hub.show_content();
+                    }
+                });
+                toggle.set_valign(gtk::Align::Center);
+                toggle.set_margin_end(px(8.0));
+                effects.append(&toggle);
+            }
+            list.append(&effects);
+            list.append(&popout::divider());
+            let place = line();
+            place.append(&self.rule_field(i, "aspect_ratio", "Size, e.g. 1200x800", &rule.size, |r, v| r.size = v));
+            place.append(&self.rule_field(i, "workspaces", "Workspace", &rule.workspace, |r, v| r.workspace = v));
+            list.append(&place);
+            self.content.append(&popout::card(&list));
+        }
+        let hub = Rc::downgrade(self);
+        let add = ui::button(s, Some("add"), "Add rule", true, true, move || {
+            let mut rules = hypr::rules();
+            rules.push(hypr::Rule { float: true, ..hypr::Rule::default() });
+            hypr::set_rules(&rules);
+            if let Some(hub) = hub.upgrade() {
+                hub.show_content();
+            }
+        });
+        add.set_halign(gtk::Align::Start);
+        self.content.append(&add);
+
+        // The apps open now that no rule names: a click adds one that floats them.
+        let mut classes: Vec<String> = hyprland::layout().map(|l| l.windows.into_iter().map(|w| w.class).collect()).unwrap_or_default();
+        classes.retain(|c| !c.is_empty() && c != APP_ID && !rules.iter().any(|r| r.class.trim() == c));
+        classes.sort();
+        classes.dedup();
+        if !classes.is_empty() {
+            self.content.append(&popout::eyebrow(s, "Open apps"));
+            let labels: Vec<&str> = classes.iter().map(String::as_str).collect();
+            let hub = Rc::downgrade(self);
+            let classes = classes.clone();
+            let chips = ui::chips(s, &labels, None, move |i| {
+                let mut rules = hypr::rules();
+                rules.push(hypr::Rule { class: classes[i].clone(), float: true, center: true, ..hypr::Rule::default() });
+                hypr::set_rules(&rules);
+                if let Some(hub) = hub.upgrade() {
+                    hub.show_content();
+                }
+            });
+            self.content.append(&chips);
+            let note = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label("Click one to float it, centred. Class and title are regular expressions.");
+            note.set_xalign(0.0);
+            note.set_margin_start(px(4.0));
+            self.content.append(&note);
+        }
+    }
+
+    /// A field editing one text part of rule `i`, saved on Enter or when focus leaves.
+    fn rule_field(self: &Rc<Self>, i: usize, glyph: &str, placeholder: &str, value: &str, set: fn(&mut hypr::Rule, String)) -> gtk::Overlay {
+        let (field, text) = ui::field(self.s, glyph, placeholder);
+        text.set_text(value);
+        field.set_hexpand(true);
+        field.set_valign(gtk::Align::Center);
+        // Not redrawn after: focus is already moving to whatever was clicked.
+        let commit = move |t: &gtk::Text| {
+            let mut rules = hypr::rules();
+            let Some(rule) = rules.get_mut(i) else { return };
+            let before = rule.clone();
+            set(rule, t.text().trim().to_owned());
+            if *rule != before {
+                hypr::set_rules(&rules);
+            }
+        };
+        text.connect_activate(commit);
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave({
+            let text = text.downgrade();
+            move |_| text.upgrade().iter().for_each(commit)
+        });
+        text.add_controller(focus);
+        field
+    }
+
     /// Shows `text` in the footer for a moment.
     fn flash(self: &Rc<Self>, text: &str) {
         while let Some(c) = self.footer.first_child() {
@@ -792,7 +931,7 @@ impl Hub {
         while let Some(c) = self.footer.first_child() {
             self.footer.remove(&c);
         }
-        if self.query.borrow().is_empty() && self.page.get() == Page::Startup {
+        if self.query.borrow().is_empty() && matches!(self.page.get(), Page::Startup | Page::Rules) {
             let status = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label("Kept in ~/.config/hypr/eclipse.lua with the hub's other Hyprland changes.");
             popout::fill(&status);
             self.footer.append(&status);
