@@ -95,10 +95,9 @@ if [ -f /usr/local/etc/doas.conf ] && ! grep -q 'eclipse-priv' /usr/local/etc/do
 	printf 'permit nopass %s as root cmd /usr/local/libexec/eclipse-priv\n' "$user" >>/usr/local/etc/doas.conf
 fi
 
-# Find out whether there is a charge limit.
-if [ ! -f /var/db/eclipse-charge-limit ]; then
-	/usr/local/libexec/eclipse-priv charge-limit probe || :
-fi
+# Find out whether there is a charge limit (again on every install: a newer
+# kernel may have added one; only the "supported" setting changes).
+/usr/local/libexec/eclipse-priv charge-limit probe || :
 sysrc -q eclipse_power_enable=YES >/dev/null
 
 # The session. Polkit lets a file manager mount a drive (through bsdisks)
@@ -113,6 +112,69 @@ fi
 ROOT
 fi
 
+# ---- start it with Hyprland --------------------------------------------------
+
+# A config that doesn't mention eclipse-shell gets a drop-in that starts it
+# (with the wallpaper daemon and PipeWire it relies on) and binds its main
+# keys where a stock config leaves them free. Full paths: ~/.local/bin need
+# not be on the compositor's PATH. A config that already runs it is left
+# alone, so a hand-written setup stays as it is.
+hypr="$HOME/.config/hypr"
+bin="$HOME/.local/bin/eclipse-shell"
+if ! grep -rqs --exclude='*.bak*' --exclude='*.pre-*' 'eclipse-shell' "$hypr"; then
+	mkdir -p "$hypr"
+	if [ -f "$hypr/hyprland.conf" ] && [ ! -f "$hypr/hyprland.lua" ]; then
+		cp -p "$hypr/hyprland.conf" "$hypr/hyprland.conf.pre-eclipse"
+		cat >>"$hypr/hyprland.conf" <<EOF
+
+# eclipse-shell (added by its install.sh)
+exec-once = pgrep -qx pipewire || { pipewire & sleep 1; pipewire-pulse & }
+exec-once = awww-daemon
+exec-once = $bin
+bind = SUPER, Space, exec, $bin toggle-launcher
+bind = SUPER, D, exec, $bin toggle-sidebar-left
+bind = SUPER ALT, D, exec, $bin toggle-sidebar-right
+bind = SUPER, Tab, exec, $bin toggle-overview
+bind = SUPER, Escape, exec, $bin toggle-power
+bind = SUPER, comma, exec, $bin hub
+bind = SUPER, K, exec, $bin hub keybinds
+bind = SUPER, W, exec, $bin wallpaper-next
+bind = SUPER SHIFT, W, exec, $bin walls
+EOF
+		say "added eclipse-shell to Hyprland's startup (~/.config/hypr/hyprland.conf)"
+	else
+		cat >"$hypr/eclipse_shell.lua" <<EOF
+-- eclipse-shell: start it with the session, and its main keys. Written by
+-- eclipse-shell's install.sh; edit freely (install.sh won't touch it again).
+local shell = "$bin"
+
+hl.on("hyprland.start", function()
+    -- no user service manager starts PipeWire, so the session does
+    hl.exec_cmd("pgrep -qx pipewire || { pipewire & sleep 1; pipewire-pulse & }")
+    hl.exec_cmd("awww-daemon")
+    hl.exec_cmd(shell)
+end)
+
+hl.bind("SUPER + Space",      hl.dsp.exec_cmd(shell .. " toggle-launcher"))
+hl.bind("SUPER + D",          hl.dsp.exec_cmd(shell .. " toggle-sidebar-left"))
+hl.bind("SUPER + ALT + D",    hl.dsp.exec_cmd(shell .. " toggle-sidebar-right"))
+hl.bind("SUPER + Tab",        hl.dsp.exec_cmd(shell .. " toggle-overview"))
+hl.bind("SUPER + Escape",     hl.dsp.exec_cmd(shell .. " toggle-power"))
+hl.bind("SUPER + comma",      hl.dsp.exec_cmd(shell .. " hub"))
+hl.bind("SUPER + K",          hl.dsp.exec_cmd(shell .. " hub keybinds"))
+hl.bind("SUPER + W",          hl.dsp.exec_cmd(shell .. " wallpaper-next"))
+hl.bind("SUPER + SHIFT + W",  hl.dsp.exec_cmd(shell .. " walls"))
+EOF
+		if [ -f "$hypr/hyprland.lua" ]; then
+			cp -p "$hypr/hyprland.lua" "$hypr/hyprland.lua.pre-eclipse"
+			printf '\n-- eclipse-shell (added by its install.sh)\nrequire("eclipse_shell")\n' >>"$hypr/hyprland.lua"
+		else
+			printf -- '-- eclipse-shell (added by its install.sh)\nrequire("eclipse_shell")\n' >"$hypr/hyprland.lua"
+		fi
+		say "added eclipse-shell to Hyprland's startup (~/.config/hypr/eclipse_shell.lua)"
+	fi
+fi
+
 # ---- restart a running shell -------------------------------------------------
 
 if pgrep -qx -U "$user" eclipse-shell; then
@@ -125,7 +187,3 @@ elif [ -n "${WAYLAND_DISPLAY:-}" ]; then
 fi
 
 echo "eclipse-shell is installed at ~/.local/bin/eclipse-shell"
-if ! grep -rqs 'eclipse-shell' "$HOME/.config/hypr"; then
-	echo "To start it with Hyprland, run 'eclipse-shell' at Hyprland startup, and bind"
-	echo "'eclipse-shell toggle-launcher' to a key for the launcher."
-fi

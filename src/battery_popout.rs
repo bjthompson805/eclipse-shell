@@ -362,6 +362,12 @@ async fn read() -> Reading {
     let mut lines = rc.lines();
     let profile = Profile::from_rc(lines.next().unwrap_or(""), lines.next().unwrap_or(""));
 
+    if fields.is_empty() {
+        if let Some(smc) = read_smc(profile).await {
+            return smc;
+        }
+    }
+
     Reading {
         percent: number("Remaining capacity").unwrap_or(0.0).clamp(0.0, 100.0) as u32,
         charging: state.contains("charging") && !state.contains("discharging"),
@@ -375,6 +381,35 @@ async fn read() -> Reading {
         limit: read_limit(),
         can_change: std::path::Path::new(HELPER).exists(),
     }
+}
+
+/// The same reading from an Apple silicon Mac's SMC (no ACPI battery there):
+/// dev.apple_smc.0.acline and dev.apple_smc.0.battery.*, capacities in mAh.
+async fn read_smc(profile: Option<Profile>) -> Option<Reading> {
+    let text = output(&["sysctl", "-e", "dev.apple_smc.0.acline", "dev.apple_smc.0.battery"]).await?;
+    let v: HashMap<&str, f64> = text
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .filter_map(|(k, val)| Some((k.trim().trim_start_matches("dev.apple_smc.0.").trim_start_matches("battery."), val.trim().parse().ok()?)))
+        .collect();
+    let percent = *v.get("life")?;
+    let state = v.get("state").copied().unwrap_or(0.0) as u32;
+    let discharging = state & 1 != 0;
+    let volts = v.get("voltage").map(|mv| mv / 1000.0);
+    let (full, design) = (v.get("full").copied(), v.get("design").copied());
+    Some(Reading {
+        percent: percent.clamp(0.0, 100.0) as u32,
+        charging: state & 2 != 0,
+        discharging,
+        on_ac: v.get("acline").is_some_and(|a| *a == 1.0),
+        minutes_left: v.get(if discharging { "time_empty" } else { "time_full" }).filter(|m| **m >= 0.0).map(|m| *m as u32),
+        watts: v.get("power").map(|mw| mw.abs() / 1000.0).filter(|w| *w > 0.0),
+        full_wh: full.zip(volts).map(|(mah, v)| mah * v / 1000.0),
+        health: full.zip(design).filter(|(_, d)| *d > 0.0).map(|(f, d)| (100.0 * f / d).round().min(100.0) as u32),
+        profile,
+        limit: read_limit(),
+        can_change: std::path::Path::new(HELPER).exists(),
+    })
 }
 
 /// The charge limit, when eclipse-priv knows the battery supports one.

@@ -122,16 +122,28 @@ wmi() {
 	acpi_call -p "$WMI_METHOD" -i 0 -i "$(($1))" -b "$buffer" -o i 2>/dev/null
 }
 
+# Apple silicon Macs: the SMC's limit (10-99%, 100 for none), which the kernel
+# offers as a sysctl. The SMC keeps it while it has power.
+SMC_LIMIT=dev.apple_smc.0.battery.charge_limit
+
 # write_limit <percent>: the firmware answers 1 when it takes it.
 write_limit() {
 	[ "$(setting supported false)" = true ] || { echo "this battery has no charge limit" >&2; exit 1; }
+	if sysctl -q "$SMC_LIMIT" >/dev/null 2>&1; then
+		sysctl -q "$SMC_LIMIT=$1" >/dev/null || { echo "the SMC refused the charge limit" >&2; exit 1; }
+		return
+	fi
 	[ "$(wmi "$WMI_DEVS" "$1")" = 1 ] || { echo "the firmware refused the charge limit" >&2; exit 1; }
 }
 
 charge_limit() {
 	case "$1 ${2:-}" in
 	"probe ")
-		if [ "$(wmi "$WMI_DSTS" 0)" = 1 ]; then remember supported true; else remember supported false; fi
+		if sysctl -q "$SMC_LIMIT" >/dev/null 2>&1 || [ "$(wmi "$WMI_DSTS" 0)" = 1 ]; then
+			remember supported true
+		else
+			remember supported false
+		fi
 		;;
 	"on ")
 		write_limit "$(setting end 80)"

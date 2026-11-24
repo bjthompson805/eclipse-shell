@@ -39,6 +39,8 @@ fi
 # Sourced as rc does: sysrc would fork a dozen helpers every poll.
 (. /etc/defaults/rc.conf && source_rc_confs; printf 'powerd=%s\npflags=%s\n' "$powerd_enable" "$powerd_flags") 2>/dev/null
 sysctl -i hw.acpi.battery.units hw.acpi.battery.life hw.acpi.battery.state
+# Apple silicon Macs: the SMC's battery (same state bits as ACPI's).
+sysctl -i dev.apple_smc.0.battery.life dev.apple_smc.0.battery.state
 "#;
 
 #[derive(Default, Clone)]
@@ -396,7 +398,12 @@ fn parse(text: &str) -> Reading {
             let state = num("hw.acpi.battery.state").unwrap_or(0.0) as u32;
             Some(Battery { percent: percent.clamp(0.0, 100.0) as u32, charging: state & 2 != 0 })
         })
-        .flatten();
+        .flatten()
+        .or_else(|| {
+            let percent = num("dev.apple_smc.0.battery.life")?;
+            let state = num("dev.apple_smc.0.battery.state").unwrap_or(0.0) as u32;
+            Some(Battery { percent: percent.clamp(0.0, 100.0) as u32, charging: state & 2 != 0 })
+        });
 
     Reading {
         volume,
