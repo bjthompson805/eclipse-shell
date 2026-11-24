@@ -35,12 +35,13 @@ pub(crate) enum Profile {
 impl Profile {
     const ALL: [Profile; 3] = [Profile::Saver, Profile::Balanced, Profile::Performance];
 
-    /// The powerd flags eclipse-priv writes for each profile.
+    /// The powerd flags eclipse-priv writes for each profile. Each profile behaves the same on
+    /// AC and on battery: the profile, not the power source, picks the policy.
     fn flags(self) -> &'static str {
         match self {
-            Profile::Saver => "-a adaptive -b minimum",
-            Profile::Balanced => "",
-            Profile::Performance => "-a maximum -b hiadaptive",
+            Profile::Saver => "-a adaptive -b adaptive",
+            Profile::Balanced => "-a hiadaptive -b hiadaptive",
+            Profile::Performance => "-a maximum -b maximum",
         }
     }
 

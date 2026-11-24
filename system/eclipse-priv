@@ -49,13 +49,13 @@ usage() {
 
 # ---- power profile -----------------------------------------------------------
 
-# powerd flags per profile. "balanced" is powerd's default (hiadaptive on AC,
-# adaptive on battery). eclipse-shell reads these exact strings back.
+# powerd flags per profile, the same on AC and on battery: the profile, not the
+# power source, picks the policy. eclipse-shell reads these exact strings back.
 profile_flags() {
 	case "$1" in
-	saver) echo "-a adaptive -b minimum" ;;
-	balanced) echo "" ;;
-	performance) echo "-a maximum -b hiadaptive" ;;
+	saver) echo "-a adaptive -b adaptive" ;;
+	balanced) echo "-a hiadaptive -b hiadaptive" ;;
+	performance) echo "-a maximum -b maximum" ;;
 	esac
 }
 
