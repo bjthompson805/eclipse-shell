@@ -94,15 +94,15 @@ fn draw_image(cr: &cairo::Context, path: &std::path::Path, size: f64) {
 
 /// The text in the accent, its ink centred in the square.
 fn draw_text(cr: &cairo::Context, text: &str, size: f64) {
-    let style = theme::TextStyle::new(size * 0.9, gtk::pango::Weight::Normal, theme::palette().accent);
+    let style = theme::TextStyle::new(size,gtk::pango::Weight::Normal, theme::palette().accent);
     let layout = pangocairo::functions::create_layout(cr);
     layout.set_text(text);
     layout.set_attributes(Some(&style.attrs()));
     let (ink, _) = layout.extents();
     let s = f64::from(gtk::pango::SCALE);
     let (x, y, w, h) = (f64::from(ink.x()) / s, f64::from(ink.y()) / s, f64::from(ink.width()) / s, f64::from(ink.height()) / s);
-    // Shrink anything wider or taller than the square, such as a word.
-    let k = (size / w.max(h)).min(1.0);
+    // Scale the ink itself to the square, so a glyph fills it edge to edge.
+    let k = size / w.max(h).max(1.0);
     let _ = cr.save();
     cr.translate(size / 2.0, size / 2.0);
     cr.scale(k, k);
