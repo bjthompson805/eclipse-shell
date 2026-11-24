@@ -157,6 +157,7 @@ fn rows() -> Vec<Row> {
     use Page::*;
     let row = |page, label, note, control| Row { page, label, note, control };
     vec![
+        row(Bar, "Logo", "On the launcher button and everywhere else the shell shows its mark. A glyph such as \u{f179}, or an image path, drawn in the accent; empty for the eclipse mark.", text!(mark, "The eclipse mark")),
         row(Bar, "System stats", "CPU, memory and temperature.", switch!(bar_stats)),
         row(Bar, "Agent usage", "Five-hour rate-limit usage for Claude Code, Codex, or Antigravity.", switch!(bar_agent_usage)),
         row(Bar, "Network speed", "Download and upload rates.", switch!(bar_net_speed)),

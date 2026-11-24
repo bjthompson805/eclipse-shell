@@ -37,6 +37,10 @@ pub struct Settings {
     pub clock_24h: bool,
     pub clock_seconds: bool,
 
+    /// The shell's logo, wherever it appears: empty for the eclipse mark, an
+    /// image path (absolute or `~/`) painted in the accent, or else text such
+    /// as a Nerd Font glyph.
+    pub mark: String,
     /// Show the CPU, memory and temperature readout.
     pub bar_stats: bool,
     /// Show the selected agent's five-hour rate-limit usage.
@@ -82,6 +86,7 @@ impl Default for Settings {
             weather_fahrenheit: crate::weather::locale_uses_fahrenheit(),
             clock_24h: false,
             clock_seconds: true,
+            mark: String::new(),
             bar_stats: true,
             bar_agent_usage: true,
             bar_net_speed: true,
