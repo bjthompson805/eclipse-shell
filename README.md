@@ -19,8 +19,8 @@ Early work in progress.
 
 FreeBSD (Linux probably works too, untested) running Hyprland with a Lua
 config. `install.sh` installs the rest: `gtk4`, `gtk4-layer-shell`, Rust,
-`curl`, wallust, the Papirus icon theme, JetBrainsMono Nerd Font, PipeWire and
-WirePlumber, D-Bus, ConsoleKit, polkit and bsdisks, plus Material Symbols
+`curl`, wallust, the Papirus icon theme, JetBrainsMono Nerd Font, PipeWire (with its OSS
+backend) and WirePlumber, D-Bus, ConsoleKit, polkit and bsdisks, plus Material Symbols
 Rounded from Google's repository.
 
 ## Install
