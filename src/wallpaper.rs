@@ -65,6 +65,26 @@ pub fn list() -> Vec<PathBuf> {
     all
 }
 
+/// Hyprland's own wallpapers, the ones it draws when nothing covers it, so
+/// the switcher can go back to them. Not in [`list`]: never shuffled to or
+/// offered for deletion.
+pub fn defaults() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = std::fs::read_dir(DEFAULTS_DIR)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.starts_with("wall")) && has_extension(p, EXTENSIONS))
+        .collect();
+    out.sort();
+    out
+}
+
+const DEFAULTS_DIR: &str = "/usr/local/share/hypr";
+
+pub fn is_default(path: &Path) -> bool {
+    path.starts_with(DEFAULTS_DIR)
+}
+
 /// A wallpaper's full size, without decoding it.
 pub fn size(path: &Path) -> Option<(i32, i32)> {
     if is_video(path) {

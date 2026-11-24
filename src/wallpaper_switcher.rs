@@ -251,9 +251,11 @@ impl WallpaperSwitcher {
         });
     }
 
-    /// Lists the folder and makes any missing or stale thumbnails.
+    /// Lists the folder, then Hyprland's defaults, and makes any missing or
+    /// stale thumbnails.
     async fn load_entries(&self) {
-        let paths = wallpaper::list();
+        let mut paths = wallpaper::list();
+        paths.extend(wallpaper::defaults());
         let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
         let stale: Vec<PathBuf> = paths.iter().filter(|p| self.cache.borrow().get(*p).is_none_or(|(t, _)| *t != mtime(p))).cloned().collect();
         if !stale.is_empty() {
@@ -274,7 +276,8 @@ impl WallpaperSwitcher {
             .unwrap_or_default();
             let mut cache = self.cache.borrow_mut();
             for (path, t, thumb, group, size) in made {
-                let name = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let stem = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = if wallpaper::is_default(&path) { format!("Hyprland default {}", stem.trim_start_matches("wall")) } else { stem };
                 let thumb = thumb.and_then(|(d, w, h)| surface(d, w, h));
                 cache.insert(path.clone(), (t, Entry { path, name, size, thumb, group }));
             }
