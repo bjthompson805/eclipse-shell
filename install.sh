@@ -133,7 +133,7 @@ if ! grep -rqs --exclude='*.bak*' --exclude='*.pre-*' 'eclipse-shell' "$hypr"; t
 		cat >>"$hypr/hyprland.conf" <<EOF
 
 # eclipse-shell (added by its install.sh)
-exec-once = pgrep -qx pipewire || { pipewire & sleep 1; pipewire-pulse & }
+exec-once = [ -S "\$XDG_RUNTIME_DIR/pipewire-0" ] || { pipewire & sleep 1; pipewire-pulse & }
 exec-once = awww-daemon
 exec-once = $bin
 bind = SUPER, Space, exec, $bin toggle-launcher
@@ -154,8 +154,10 @@ EOF
 local shell = "$bin"
 
 hl.on("hyprland.start", function()
-    -- no user service manager starts PipeWire, so the session does
-    hl.exec_cmd("pgrep -qx pipewire || { pipewire & sleep 1; pipewire-pulse & }")
+    -- no user service manager starts PipeWire, so the session does, unless
+    -- its own runtime dir has one (a PipeWire started from ssh lives in
+    -- another dir, out of the shell's reach)
+    hl.exec_cmd('[ -S "\$XDG_RUNTIME_DIR/pipewire-0" ] || { pipewire & sleep 1; pipewire-pulse & }')
     hl.exec_cmd("awww-daemon")
     hl.exec_cmd(shell)
 end)
