@@ -80,7 +80,7 @@ impl TrafficPopout {
         self.popout.show(Anchor::Under(x));
 
         // Name the Wi-Fi network once it's known.
-        if t.iface.starts_with("wlan") {
+        if wifi::is_wifi(&t.iface) {
             let popout = Rc::downgrade(self);
             glib::spawn_future_local(async move {
                 let Ok(status) = gio::spawn_blocking(wifi::read).await else { return };

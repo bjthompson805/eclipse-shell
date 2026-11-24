@@ -18,7 +18,14 @@
 #       Check for support; write the limit (boot); lift it to 100% before
 #       power-off if full-when-off is on (shutdown).
 #   eclipse-priv wifi on|off
-#       Bring every Wi-Fi interface up or down.
+#       Bring every Wi-Fi interface up or down; on an M5 Mac, the N1 radio
+#       (on again rejoins the boot network).
+#   eclipse-priv n1wifi join <ssid-hex> known|new
+#       Join through /dev/n1wifi: known uses the stored key, new reads a PMK
+#       (64 hex digits) on stdin and stores it once the join works. Then DHCP.
+#   eclipse-priv n1wifi disconnect
+#   eclipse-priv n1wifi boot <ssid-hex>
+#       Make a known network the one the kernel joins at boot (loader.conf).
 #   eclipse-priv bt pair <addr> [name]
 #       Remember a device: name it in /etc/bluetooth/hosts and give hcsecd a
 #       PIN for it, so the first connection pairs.
@@ -36,7 +43,7 @@ set -eu
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 usage() {
-	sed -n '6,34p' "$0" >&2
+	sed -n '6,41p' "$0" >&2
 	exit 2
 }
 
@@ -179,8 +186,137 @@ charge_limit() {
 
 wifi() {
 	case "$1" in
-	on) for i in $(ifconfig -g wlan); do ifconfig "$i" up; done ;;
-	off) for i in $(ifconfig -g wlan); do ifconfig "$i" down; done ;;
+	on)
+		for i in $(ifconfig -g wlan); do ifconfig "$i" up; done
+		if [ -c "$N1_DEV" ]; then
+			"$N1_HELPER" radio on
+			n1_autojoin </dev/null >/dev/null 2>&1 &
+		fi
+		;;
+	off)
+		for i in $(ifconfig -g wlan); do ifconfig "$i" down; done
+		if [ -c "$N1_DEV" ]; then "$N1_HELPER" radio off; fi
+		;;
+	*) usage ;;
+	esac
+}
+
+# M5 Macs: the N1's firmware does 802.11 and WPA2 itself. The host sees an
+# Ethernet interface, n1w0, and joins through /dev/n1wifi (no wlan, no
+# wpa_supplicant); eclipse-n1wifi does the root-only ioctls. A known network's
+# key is its PMK in $N1_KEYS/<ssid hex>, readable by root alone (the names are
+# just SSIDs, so the shell may list them). The network the kernel joins at
+# boot is the loader's hw.apple_n1.ssid and hw.apple_n1.pmk; the kernel drops
+# the PMK from kenv once read, so loader.conf is where it's looked up. Keys
+# travel on stdin or through builtins, never argv, where ps would show them.
+N1_DEV=/dev/n1wifi
+N1_HELPER=/usr/local/libexec/eclipse-n1wifi
+N1_KEYS=/var/db/eclipse-wifi
+N1_IF=n1w0
+LOADER_CONF=/boot/loader.conf
+
+# n1_hex <hex> <max bytes>: lower-case hex of 1 to max bytes, or exit.
+n1_hex() {
+	case "$1" in
+	'' | *[!0-9a-f]*) echo "not lower-case hex: $1" >&2; exit 2 ;;
+	esac
+	[ $((${#1} % 2)) -eq 0 ] && [ ${#1} -le $(($2 * 2)) ] || { echo "bad hex length" >&2; exit 2; }
+}
+
+# n1_pmk <hex>: exactly 32 bytes of hex (never echoed).
+n1_pmk() {
+	case "$1" in
+	'' | *[!0-9a-f]*) echo "the key must be 64 lower-case hex digits" >&2; exit 2 ;;
+	esac
+	[ ${#1} -eq 64 ] || { echo "the key must be 64 lower-case hex digits" >&2; exit 2; }
+}
+
+# loader_value <escaped name>: the last setting of a loader.conf variable.
+loader_value() {
+	sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*\$/\1/p" "$LOADER_CONF" 2>/dev/null | tail -n 1
+}
+
+# n1_boot_hex: the boot network's SSID in hex, or nothing.
+n1_boot_hex() {
+	ssid=$(loader_value 'hw\.apple_n1\.ssid')
+	[ -n "$ssid" ] || return 0
+	printf '%s' "$ssid" | od -An -v -tx1 | tr -d ' \n'
+}
+
+# n1_stored <ssid hex>: print the network's PMK, from $N1_KEYS or, for the
+# boot network, loader.conf; fails if neither has it.
+n1_stored() {
+	pmk=
+	if [ -f "$N1_KEYS/$1" ]; then
+		IFS= read -r pmk <"$N1_KEYS/$1" || :
+	elif [ "$(n1_boot_hex)" = "$1" ]; then
+		pmk=$(loader_value 'hw\.apple_n1\.pmk')
+	fi
+	[ -n "$pmk" ] || return 1
+	printf '%s\n' "$pmk"
+}
+
+# n1w0 reports no media type, so devd's stock dhclient rule never fires for
+# it; restart dhclient on the new link (a running one would hold on to the
+# old network's lease).
+n1_dhcp() {
+	pid=/var/run/dhclient/dhclient.$N1_IF.pid
+	if [ -f "$pid" ] && pkill -F "$pid" 2>/dev/null; then sleep 0.5; fi
+	dhclient -b "$N1_IF" >/dev/null 2>&1 || :
+}
+
+# n1_join <ssid hex> <pmk>: join (waiting for the outcome), then DHCP.
+n1_join() {
+	printf '%s\n' "$2" | "$N1_HELPER" join "$1"
+	n1_dhcp
+}
+
+# After the radio comes back: the boot network, as the kernel would.
+n1_autojoin() {
+	hex=$(n1_boot_hex)
+	[ -n "$hex" ] || return 0
+	pmk=$(n1_stored "$hex") || return 0
+	n1_join "$hex" "$pmk"
+}
+
+n1wifi() {
+	[ -c "$N1_DEV" ] || { echo "no N1 Wi-Fi device ($N1_DEV)" >&2; exit 1; }
+	case "$1 $#" in
+	"join 3")
+		n1_hex "$2" 32
+		pmk=
+		case "$3" in
+		known) pmk=$(n1_stored "$2") || { echo "No key is stored for this network" >&2; exit 1; } ;;
+		new) IFS= read -r pmk || : ;;
+		*) usage ;;
+		esac
+		n1_pmk "$pmk"
+		n1_join "$2" "$pmk"
+		if [ "$3" = new ]; then
+			mkdir -p "$N1_KEYS"
+			chown root:wheel "$N1_KEYS"
+			chmod 755 "$N1_KEYS"
+			(umask 077 && printf '%s\n' "$pmk" >"$N1_KEYS/$2.new")
+			mv -f "$N1_KEYS/$2.new" "$N1_KEYS/$2"
+		fi
+		;;
+	"disconnect 1") "$N1_HELPER" disconnect ;;
+	"boot 2")
+		n1_hex "$2" 32
+		ssid=$("$N1_HELPER" ssid "$2")
+		pmk=$(n1_stored "$2") || { echo "Join the network once first" >&2; exit 1; }
+		n1_pmk "$pmk"
+		if [ -f "$LOADER_CONF" ] && [ ! -f "$LOADER_CONF.pre-eclipse" ]; then
+			cp -p "$LOADER_CONF" "$LOADER_CONF.pre-eclipse"
+		fi
+		mode=$(stat -f %Lp "$LOADER_CONF" 2>/dev/null) || mode=644
+		{
+			grep -Ev '^[[:space:]]*hw\.apple_n1\.(ssid|pmk)[[:space:]]*=' "$LOADER_CONF" 2>/dev/null || :
+			printf 'hw.apple_n1.ssid="%s"\nhw.apple_n1.pmk="%s"\n' "$ssid" "$pmk"
+		} >"$LOADER_CONF.new"
+		chmod "$mode" "$LOADER_CONF.new"
+		mv -f "$LOADER_CONF.new" "$LOADER_CONF"
+		;;
 	*) usage ;;
 	esac
 }
@@ -357,6 +493,7 @@ case "$1" in
 power-profile) [ $# -eq 2 ] || usage; power_profile "$2" ;;
 charge-limit) shift; charge_limit "$@" ;;
 wifi) [ $# -eq 2 ] || usage; wifi "$2" ;;
+n1wifi) shift; n1wifi "$@" ;;
 bt) shift; bt "$@" ;;
 *) usage ;;
 esac

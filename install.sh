@@ -7,7 +7,8 @@
 #   ./install.sh --no-system  skip packages and the root helper (build only)
 #
 # The root helper (eclipse-priv) does the few things the shell needs root for:
-# power profiles, the battery charge limit and the Wi-Fi radio. The user may
+# power profiles, the battery charge limit, the Wi-Fi radio and, on M5 Macs,
+# joining networks through the N1 Wi-Fi device (eclipse-n1wifi). The user may
 # run it, and only it, without a password.
 #
 # It also sets up the session: D-Bus, and a ConsoleKit session for every
@@ -75,11 +76,15 @@ cp "$repo/data/io.github.bjthompson805.EclipseWalls.desktop" "$HOME/.local/share
 
 if [ $system -eq 1 ]; then
 	say "installing the root helper"
-	$as_root sh -s -- "$user" "$repo" <<'ROOT'
+	$as_root sh -s -- "$user" "$repo" "$HOME/.local/bin" <<'ROOT'
 set -eu
 user=$1
 repo=$2
+bin=$3
 install -o root -g wheel -m 755 "$repo/system/eclipse-priv" /usr/local/libexec/eclipse-priv
+# The N1 Wi-Fi ioctls (M5 Macs), which eclipse-priv runs as root. A root-owned
+# copy: the one cargo built is the user's to change.
+install -o root -g wheel -m 755 "$bin/eclipse-n1wifi" /usr/local/libexec/eclipse-n1wifi
 install -o root -g wheel -m 755 "$repo/system/rc.d/eclipse_power" /usr/local/etc/rc.d/eclipse_power
 
 # The sudo rule, checked before it goes live.

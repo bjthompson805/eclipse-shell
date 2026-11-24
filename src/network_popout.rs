@@ -1,7 +1,10 @@
 //! Network popout, dropping from the network glyph in the status cluster: the
 //! wired link and the joined Wi-Fi network, then the Wi-Fi radio, a rescan,
 //! and the networks in range. Clicking a network leaves it if joined, joins it
-//! if known or open, and otherwise asks for its password in place.
+//! if known or open, and otherwise asks for its password in place. On an M5
+//! Mac (the N1 backend) a network the firmware can't join says so, a known
+//! network whose key fails asks for the password again, and the joined
+//! network can be made the one the kernel joins at boot.
 //!
 //! Readings come from src/wifi.rs every few seconds while the card is open,
 //! with a fresh scan now and then. The card is only rebuilt when what it lists
@@ -125,8 +128,9 @@ impl NetworkPopout {
     fn shape(&self) -> String {
         let status = self.status.borrow();
         let mut shape = format!(
-            "{:?} {} {} {} {} {:?} {:?} {:?} {} {}|",
+            "{:?} {:?} {} {} {} {} {:?} {:?} {:?} {} {}|",
             status.iface,
+            status.boot,
             status.radio,
             status.reachable,
             status.wired.is_some(),
@@ -138,7 +142,7 @@ impl NetworkPopout {
             self.radio_failed.get(),
         );
         for n in &status.networks {
-            shape += &format!("{} {} {} {}|", n.ssid, n.secured, n.known, n.connected);
+            shape += &format!("{} {} {} {} {}|", n.ssid, n.secured, n.known, n.connected, n.joinable);
         }
         shape
     }
@@ -201,6 +205,11 @@ impl NetworkPopout {
                 glib::spawn_future_local(async move { network.refresh().await });
             });
         }
+        if !net.joinable {
+            *self.asking.borrow_mut() = None;
+            *self.failure.borrow_mut() = Some((net.ssid.clone(), "This Wi-Fi can't join this network's security (WPA2 Personal only)".into()));
+            return self.rebuild();
+        }
         if net.known || !net.secured {
             *self.asking.borrow_mut() = None;
             return self.join(net.ssid.clone(), None);
@@ -219,6 +228,8 @@ impl NetworkPopout {
         self.rebuild();
         let network = self.clone();
         let target = ssid.clone();
+        // The N1 keeps a stored key, which may be stale: ask for it again.
+        let ask_again = password.is_none() && self.status.borrow().backend == wifi::Backend::N1;
         blocking(
             move || wifi::connect(&target, password.as_deref()),
             move |result| {
@@ -228,7 +239,13 @@ impl NetworkPopout {
                         *network.asking.borrow_mut() = None;
                         network.draft.borrow_mut().clear();
                     }
-                    Err(why) => *network.failure.borrow_mut() = Some((ssid, why)),
+                    Err(why) => {
+                        if ask_again {
+                            *network.asking.borrow_mut() = Some(ssid.clone());
+                            network.draft.borrow_mut().clear();
+                        }
+                        *network.failure.borrow_mut() = Some((ssid, why));
+                    }
                 }
                 glib::spawn_future_local(async move { network.refresh().await });
             },
@@ -248,7 +265,37 @@ impl NetworkPopout {
         });
     }
 
+    /// Writes the joined network into loader.conf, so it's the one after a reboot.
+    fn set_boot(self: &Rc<Self>, ssid: String) {
+        let network = self.clone();
+        let target = ssid.clone();
+        blocking(
+            move || wifi::set_boot(&target),
+            move |result| {
+                *network.failure.borrow_mut() = result.err().map(|why| (ssid, why));
+                glib::spawn_future_local(async move { network.refresh().await });
+            },
+        );
+    }
+
     // ---- the card --------------------------------------------------------
+
+    /// Whether the kernel joins `joined` at boot, or a click to make it so.
+    fn boot_line(self: &Rc<Self>, s: f64, status: &Status, joined: &str) -> gtk::Label {
+        let at_boot = status.boot.as_deref() == Some(joined);
+        let label = if at_boot {
+            TextStyle::new(9.5 * s, pango::Weight::Medium, FAINT).label("Joins at startup")
+        } else {
+            TextStyle::new(9.5 * s, pango::Weight::Semibold, theme::palette().accent_lit).label("Join this network at startup")
+        };
+        label.set_xalign(0.0);
+        label.set_margin_start((28.0 * s).round() as i32);
+        if !at_boot {
+            let (network, ssid) = (Rc::downgrade(self), joined.to_owned());
+            on_click(&label, move || network.upgrade().into_iter().for_each(|n| n.set_boot(ssid.clone())));
+        }
+        label
+    }
 
     fn body(self: &Rc<Self>, s: f64, status: &Status) -> gtk::Box {
         let px = |v: f64| (v * s).round() as i32;
@@ -274,10 +321,13 @@ impl NetworkPopout {
             live.wired = Some(label);
             column.append(&row);
         }
-        if status.joined().is_some() {
+        if let Some(joined) = status.joined() {
             let (row, label) = link_line(s, "wifi");
             live.joined = Some(label);
             column.append(&row);
+            if status.backend == wifi::Backend::N1 {
+                column.append(&self.boot_line(s, status, &joined.ssid));
+            }
         }
         drop(live);
 
@@ -328,7 +378,10 @@ impl NetworkPopout {
             return section;
         }
         if !status.reachable {
-            section.append(&note(s, "wpa_supplicant isn't running"));
+            section.append(&note(s, match status.backend {
+                wifi::Backend::Supplicant => "wpa_supplicant isn't running",
+                wifi::Backend::N1 => "The Wi-Fi firmware isn't running",
+            }));
             return section;
         }
         if status.networks.is_empty() {
@@ -386,6 +439,9 @@ impl NetworkPopout {
         content.append(&name);
         if self.joining.borrow().as_deref() == Some(&net.ssid) {
             content.append(&TextStyle::new(9.5 * s, pango::Weight::Semibold, FLAME).label("Joining…"));
+        }
+        if !net.joinable {
+            content.append(&TextStyle::new(9.5 * s, pango::Weight::Medium, FAINT).label("Not supported"));
         }
         if net.secured {
             content.append(&theme::filled_icon_glyph("lock", 11.0 * s, ICON_DIM));

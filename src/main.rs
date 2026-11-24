@@ -30,6 +30,9 @@ mod osd;
 mod profile;
 mod sidebar;
 mod mixer_popout;
+// Shared with the eclipse-n1wifi helper, which uses the root-only commands.
+#[allow(dead_code)]
+mod n1wifi;
 mod overview;
 mod popout;
 mod power;
