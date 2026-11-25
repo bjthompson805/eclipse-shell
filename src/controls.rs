@@ -1,6 +1,8 @@
 //! The right sidebar: quick controls over a tabbed glance. A clock and the
 //! weather, quick toggles (Wi-Fi, Bluetooth, do not disturb, night light,
-//! always on, microphone, airplane mode), volume and brightness faders, then a tab rail
+//! always on, microphone, airplane mode) in a box, a row at a time with the
+//! rest behind a chevron, the apps (Hub, Screenshot) flat beneath them,
+//! volume and brightness faders, then a tab rail
 //! over notifications, the calendar, now playing, the forecast and the
 //! screen recorder with its recordings.
 //!
@@ -37,6 +39,10 @@ const POLL: Duration = Duration::from_secs(2);
 /// A toggle's change shows up in its state after about this long.
 const SETTLE: Duration = Duration::from_millis(700);
 const HELPER: &str = "/usr/local/libexec/eclipse-priv";
+/// Toggles in a row; more wrap behind the chevron.
+const PER_ROW: usize = 5;
+/// The apps row: glyph, name, and the eclipse-shell command that opens it.
+const APPS: &[(&str, &str, &[&str])] = &[("settings", "Hub", &["hub"]), ("screenshot_region", "Screenshot", &["screenshot"])];
 const NIGHT_TEMPERATURE: &str = "4500";
 /// Hyprland starts hypridle alongside the shell, so a remembered Always on
 /// keeps stopping it for this long after startup.
@@ -70,6 +76,9 @@ pub struct Controls {
     generation: Cell<u32>,
     state: RefCell<State>,
     toggles: RefCell<Option<gtk::Box>>,
+    /// The toggles past the first row are showing; kept across opens and
+    /// restarts (see [`expanded_path`]).
+    expanded: Cell<bool>,
     volume: RefCell<Option<Rc<Fader>>>,
     brightness: RefCell<Option<Rc<Fader>>>,
     rail: RefCell<Option<gtk::Box>>,
@@ -110,6 +119,7 @@ impl Controls {
             generation: Cell::new(0),
             state: RefCell::default(),
             toggles: RefCell::default(),
+            expanded: Cell::new(expanded_path().exists()),
             volume: RefCell::default(),
             brightness: RefCell::default(),
             rail: RefCell::default(),
@@ -183,6 +193,9 @@ impl Controls {
         column.append(&toggles);
         *self.toggles.borrow_mut() = Some(toggles);
         self.show_toggles();
+        // Apps under the toggles, flat where the toggles are boxed, so the
+        // two never read as one set.
+        column.append(&self.apps(s));
 
         // Faders: volume (glyph click mutes) and the backlight, filled in by the first poll.
         let faders = gtk::Box::new(gtk::Orientation::Vertical, px(6.0));
@@ -370,10 +383,82 @@ impl Controls {
                 }
             }))));
         }
-        for (i, t) in tiles.iter().enumerate() {
-            grid.attach(t, (i % 3) as i32, (i / 3) as i32, 1, 1);
+        // A row of PER_ROW; the rest behind the chevron bar below it.
+        let expanded = self.expanded.get();
+        for (i, t) in tiles.iter().enumerate().take(if expanded { usize::MAX } else { PER_ROW }) {
+            grid.attach(t, (i % PER_ROW) as i32, (i / PER_ROW) as i32, 1, 1);
         }
-        holder.append(&grid);
+        // Keep the columns even when a row is short.
+        for i in tiles.len()..PER_ROW {
+            grid.attach(&gtk::Box::new(gtk::Orientation::Horizontal, 0), i as i32, 0, 1, 1);
+        }
+        let inner = gtk::Box::new(gtk::Orientation::Vertical, px(8.0));
+        inner.set_margin_top(px(10.0));
+        inner.set_margin_bottom(px(10.0));
+        inner.set_margin_start(px(10.0));
+        inner.set_margin_end(px(10.0));
+        inner.append(&grid);
+        if tiles.len() > PER_ROW {
+            let weak = Rc::downgrade(self);
+            inner.append(&chevron(s, expanded, move || {
+                if let Some(c) = weak.upgrade() {
+                    let open = !c.expanded.get();
+                    c.expanded.set(open);
+                    let path = expanded_path();
+                    if open {
+                        let _ = path.parent().map(std::fs::create_dir_all);
+                        let _ = std::fs::write(&path, "");
+                    } else {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    c.show_toggles();
+                }
+            }));
+        }
+        // The toggles' box, which sets them apart from the apps below.
+        let back = gtk::DrawingArea::new();
+        back.set_draw_func(move |_, cr, w, h| {
+            let palette = theme::palette();
+            theme::rounded_rect(cr, 0.5, 0.5, f64::from(w) - 1.0, f64::from(h) - 1.0, 12.0 * s);
+            theme::set_source(cr, palette.raised.alpha(0.5));
+            let _ = cr.fill_preserve();
+            cr.set_line_width(1.0);
+            theme::set_source(cr, palette.outline);
+            let _ = cr.stroke();
+        });
+        let boxed = gtk::Overlay::new();
+        boxed.set_child(Some(&back));
+        boxed.add_overlay(&inner);
+        boxed.set_measure_overlay(&inner, true);
+        holder.append(&boxed);
+    }
+
+    /// The apps row: Eclipse's own apps, launched with the sidebar closed
+    /// first, so a screenshot doesn't catch it.
+    fn apps(self: &Rc<Self>, s: f64) -> gtk::Box {
+        let px = |v: f64| (v * s).round() as i32;
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        row.set_homogeneous(true);
+        row.set_margin_top(px(2.0));
+        for (i, (glyph, name, args)) in APPS.iter().enumerate() {
+            let weak = Rc::downgrade(self);
+            let tile = app_tile(s, glyph, name, i > 0, move || {
+                if let Some(c) = weak.upgrade() {
+                    c.sidebar.hide();
+                }
+                // Once the sidebar has slid away.
+                glib::timeout_add_local_once(Duration::from_millis(400), move || {
+                    if let Ok(exe) = std::env::current_exe() {
+                        let exe = exe.display().to_string();
+                        let mut argv = vec![exe.as_str()];
+                        argv.extend_from_slice(args);
+                        audio::spawn(&argv);
+                    }
+                });
+            });
+            row.append(&tile);
+        }
+        row
     }
 }
 
@@ -430,27 +515,141 @@ fn tile(s: f64, glyph: &str, name: &str, on: bool, pressed: impl Fn() + 'static)
             let _ = cr.stroke();
         }
     });
-    let content = gtk::Box::new(gtk::Orientation::Vertical, px(5.0));
-    content.set_margin_top(px(11.0));
-    content.set_margin_bottom(px(10.0));
-    content.set_margin_start(px(6.0));
-    content.set_margin_end(px(6.0));
-    let icon = if on { theme::filled_icon_glyph(glyph, 19.0 * s, theme::palette().accent_lit) } else { theme::icon_glyph(glyph, 19.0 * s, ICON_DIM) };
-    content.append(&icon);
-    let label = TextStyle::new(9.5 * s, pango::Weight::Medium, if on { CREAM } else { SUBTLE }).label(name);
+    // Glyph only; the name fades in along the bottom on hover, as ryoku's.
+    back.set_size_request(-1, px(44.0));
+    let icon = if on { theme::filled_icon_glyph(glyph, 17.0 * s, theme::palette().accent_lit) } else { theme::icon_glyph(glyph, 17.0 * s, ICON_DIM) };
+    icon.set_halign(gtk::Align::Center);
+    icon.set_valign(gtk::Align::Center);
+    icon.set_can_target(false);
+    let label = TextStyle::new(7.5 * s, pango::Weight::Semibold, CREAM).label(name);
     label.set_ellipsize(pango::EllipsizeMode::End);
     label.set_max_width_chars(1);
-    label.set_hexpand(true);
-    content.append(&label);
+    label.set_valign(gtk::Align::End);
+    label.set_margin_bottom(px(3.0));
+    label.set_margin_start(px(3.0));
+    label.set_margin_end(px(3.0));
+    label.set_can_target(false);
+    label.set_opacity(0.0);
     let tile = gtk::Overlay::new();
     tile.set_child(Some(&back));
-    tile.add_overlay(&content);
-    tile.set_measure_overlay(&content, true);
+    tile.add_overlay(&icon);
+    tile.add_overlay(&label);
+    tile.set_cursor_from_name(Some("pointer"));
+    tile.update_property(&[gtk::accessible::Property::Label(name)]);
     popout::on_hover(&tile, {
-        let back = back.downgrade();
+        let (back, label) = (back.downgrade(), label.downgrade());
         move |inside| {
             hovered.set(inside);
             back.upgrade().into_iter().for_each(|b| b.queue_draw());
+            label.upgrade().into_iter().for_each(|l| l.set_opacity(if inside { 1.0 } else { 0.0 }));
+        }
+    });
+    popout::on_click(&tile, pressed);
+    tile
+}
+
+/// Present while the toggles are expanded.
+fn expanded_path() -> std::path::PathBuf {
+    glib::user_state_dir().join("eclipse-shell").join("toggles-expanded")
+}
+
+/// The full-width bar under the toggles that shows the rest, or hides them.
+fn chevron(s: f64, expanded: bool, pressed: impl Fn() + 'static) -> gtk::Overlay {
+    let hovered = Rc::new(Cell::new(false));
+    let back = gtk::DrawingArea::builder().content_height((20.0 * s).round() as i32).build();
+    back.set_draw_func({
+        let hovered = hovered.clone();
+        move |_, cr, w, h| {
+            if hovered.get() {
+                theme::rounded_rect(cr, 0.5, 0.5, f64::from(w) - 1.0, f64::from(h) - 1.0, 8.0 * s);
+                theme::set_source(cr, theme::palette().raised);
+                let _ = cr.fill_preserve();
+                cr.set_line_width(1.0);
+                theme::set_source(cr, theme::CHIP_EDGE);
+                let _ = cr.stroke();
+            }
+        }
+    });
+    let icon = theme::icon_glyph(if expanded { "expand_less" } else { "expand_more" }, 15.0 * s, ICON_DIM);
+    icon.set_can_target(false);
+    let bar = gtk::Overlay::new();
+    bar.set_child(Some(&back));
+    bar.add_overlay(&icon);
+    bar.set_cursor_from_name(Some("pointer"));
+    bar.update_property(&[gtk::accessible::Property::Label(if expanded { "Fewer toggles" } else { "More toggles" })]);
+    popout::on_hover(&bar, {
+        let (back, icon) = (back.downgrade(), icon.downgrade());
+        let glyph = if expanded { "expand_less" } else { "expand_more" };
+        move |inside| {
+            hovered.set(inside);
+            back.upgrade().into_iter().for_each(|b| b.queue_draw());
+            if let Some(icon) = icon.upgrade() {
+                icon.set_attributes(theme::icon_glyph(glyph, 15.0 * s, if inside { CREAM } else { ICON_DIM }).attributes().as_ref());
+            }
+        }
+    });
+    popout::on_click(&bar, pressed);
+    bar
+}
+
+/// An app on the apps row: an outlined square with its glyph, its name
+/// under it, and (after the first) a hairline on its leading edge. Flat,
+/// with no box, unlike the toggles.
+fn app_tile(s: f64, glyph: &str, name: &str, divider: bool, pressed: impl Fn() + 'static) -> gtk::Overlay {
+    let px = |v: f64| (v * s).round() as i32;
+    let hovered = Rc::new(Cell::new(false));
+    let square = gtk::DrawingArea::builder().content_width(px(38.0)).content_height(px(38.0)).halign(gtk::Align::Center).build();
+    square.set_draw_func({
+        let hovered = hovered.clone();
+        move |_, cr, w, h| {
+            let palette = theme::palette();
+            theme::rounded_rect(cr, 0.5, 0.5, f64::from(w) - 1.0, f64::from(h) - 1.0, 10.0 * s);
+            if hovered.get() {
+                theme::set_source(cr, palette.raised);
+                let _ = cr.fill_preserve();
+            }
+            cr.set_line_width(1.0);
+            theme::set_source(cr, if hovered.get() { theme::CHIP_EDGE } else { palette.outline });
+            let _ = cr.stroke();
+        }
+    });
+    let icon = theme::icon_glyph(glyph, 16.0 * s, ICON_DIM);
+    icon.set_can_target(false);
+    let face = gtk::Overlay::new();
+    face.set_child(Some(&square));
+    face.add_overlay(&icon);
+    face.set_halign(gtk::Align::Center);
+    let label = TextStyle::new(9.5 * s, pango::Weight::Medium, SUBTLE).label(name);
+    let column = gtk::Box::new(gtk::Orientation::Vertical, px(6.0));
+    column.append(&face);
+    column.append(&label);
+    column.set_margin_top(px(2.0));
+    column.set_margin_bottom(px(2.0));
+    // The hairline between apps.
+    let line = gtk::DrawingArea::builder().content_width(1).content_height(px(22.0)).halign(gtk::Align::Start).valign(gtk::Align::Start).margin_top(px(10.0)).can_target(false).build();
+    line.set_draw_func(|_, cr, w, h| {
+        theme::set_source(cr, theme::HAIR);
+        cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
+        let _ = cr.fill();
+    });
+    line.set_visible(divider);
+    let tile = gtk::Overlay::new();
+    tile.set_child(Some(&column));
+    tile.add_overlay(&line);
+    tile.set_cursor_from_name(Some("pointer"));
+    tile.update_property(&[gtk::accessible::Property::Label(name)]);
+    popout::on_hover(&tile, {
+        let (square, icon, label) = (square.downgrade(), icon.downgrade(), label.downgrade());
+        let glyph = glyph.to_owned();
+        move |inside| {
+            hovered.set(inside);
+            square.upgrade().into_iter().for_each(|q| q.queue_draw());
+            if let Some(icon) = icon.upgrade() {
+                icon.set_attributes(theme::icon_glyph(&glyph, 16.0 * s, if inside { CREAM } else { ICON_DIM }).attributes().as_ref());
+            }
+            if let Some(label) = label.upgrade() {
+                TextStyle::new(9.5 * s, pango::Weight::Medium, if inside { CREAM } else { SUBTLE }).apply(&label);
+            }
         }
     });
     popout::on_click(&tile, pressed);
