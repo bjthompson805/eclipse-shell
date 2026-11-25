@@ -120,9 +120,18 @@ pub fn run(text: &str) -> Option<Run> {
     Some(Run { phase, label: text(&v, "label"), error, snapshot: text(&v, "snapshot"), steps, log })
 }
 
-/// Terminals to run an update in, first found wins, each with the flag
-/// that runs a command.
-const TERMINALS: &[(&str, &[&str])] = &[("foot", &["--title", "Eclipse update", "--"]), ("kitty", &["--title", "Eclipse update", "--"]), ("alacritty", &["--title", "Eclipse update", "-e"]), ("xterm", &["-T", "Eclipse update", "-e"])];
+/// Terminals to run an update in, first found wins, each with the flags
+/// that set its class and run a command.
+const TERMINALS: &[(&str, &[&str])] = &[
+    ("foot", &["--app-id", TERMINAL_CLASS, "--title", "Eclipse update", "--"]),
+    ("kitty", &["--class", TERMINAL_CLASS, "--title", "Eclipse update", "--"]),
+    ("alacritty", &["--class", TERMINAL_CLASS, "--title", "Eclipse update", "-e"]),
+    ("xterm", &["-class", TERMINAL_CLASS, "-T", "Eclipse update", "-e"]),
+];
+
+/// The update terminal's class. It floats: tiled, it opened behind the
+/// floating hub that started it.
+const TERMINAL_CLASS: &str = "eclipse-update";
 
 /// Runs the update, then waits for a key so its output can be read.
 const WRAPPER: &str = "\"$0\" update; printf '\\nPress any key to close.'; stty -icanon -echo min 1 2>/dev/null; dd bs=1 count=1 >/dev/null 2>&1";
@@ -134,6 +143,7 @@ pub fn start() -> std::io::Result<()> {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no terminal found (foot, kitty, alacritty or xterm)"));
     };
     let exe = std::env::current_exe()?;
+    crate::hyprland::eval(&format!("hl.window_rule({{ name = \"eclipse-update\", match = {{ class = \"^({TERMINAL_CLASS})$\" }}, float = true, size = {{ 1000, 620 }}, center = true }})"));
     Command::new(terminal).args(*flags).args(["sh", "-c", WRAPPER]).arg(exe).process_group(0).stdin(std::process::Stdio::null()).spawn().map(|_| ())
 }
 
