@@ -420,20 +420,27 @@ impl Hud {
         self.fixed.move_(&self.shape, bx0.floor(), by0.floor());
         self.shape.queue_draw();
 
-        // Input: the island, or the nub and a strip of frame around it to pop it back.
+        // Input: the island; tucked, the nub and a strip of frame around it,
+        // out to the screen's edge, to pop it back. Hovered out of a tuck it
+        // keeps that strip too, so resting on the screen's very edge, below
+        // the island, doesn't tuck it away.
         if let Some(surface) = self.window.surface() {
+            let (reach, pad, fe) = (46.0 * s, 44.0 * s, config::get().frame_edge);
+            let strip = match side {
+                Side::Bottom => (x - pad, e - reach, bw + 2.0 * pad, reach + fe),
+                Side::Top => (x - pad, e - fe, bw + 2.0 * pad, reach + fe),
+                Side::Left => (0.0, y - pad, e + reach, bh + 2.0 * pad),
+                Side::Right => (e - reach, y - pad, reach + fe, bh + 2.0 * pad),
+            };
+            let island = (bx0, by0, bx1 - bx0, by1 - by0);
             let region = if self.tucked() {
-                let reach = 46.0 * s;
-                let pad = 44.0 * s;
-                let rect = match side {
-                    Side::Bottom => (x - pad, e - reach, bw + 2.0 * pad, reach + config::get().frame_edge),
-                    Side::Top => (x - pad, e - config::get().frame_edge, bw + 2.0 * pad, reach + config::get().frame_edge),
-                    Side::Left => (0.0, y - pad, e + reach, bh + 2.0 * pad),
-                    Side::Right => (e - reach, y - pad, reach + config::get().frame_edge, bh + 2.0 * pad),
-                };
-                rect
+                strip
+            } else if self.hidden.get() {
+                let (x0, y0) = (strip.0.min(island.0), strip.1.min(island.1));
+                let (x1, y1) = ((strip.0 + strip.2).max(island.0 + island.2), (strip.1 + strip.3).max(island.1 + island.3));
+                (x0, y0, x1 - x0, y1 - y0)
             } else {
-                (bx0, by0, bx1 - bx0, by1 - by0)
+                island
             };
             self.input.set(region);
             let r = cairo::RectangleInt::new(region.0.floor() as i32, region.1.floor() as i32, region.2.ceil() as i32, region.3.ceil() as i32);
