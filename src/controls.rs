@@ -453,7 +453,7 @@ impl Controls {
                 }
                 // Once the sidebar has slid away.
                 glib::timeout_add_local_once(Duration::from_millis(400), move || {
-                    if let Ok(exe) = std::env::current_exe() {
+                    if let Ok(exe) = crate::exe() {
                         let exe = exe.display().to_string();
                         let mut argv = vec![exe.as_str()];
                         argv.extend_from_slice(args);

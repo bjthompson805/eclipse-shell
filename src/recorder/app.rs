@@ -145,7 +145,7 @@ impl Recorder {
         words.append(&info);
         head.append(&words);
         let record = ui::button(s, Some("fiber_manual_record"), "Record", true, true, || {
-            let Ok(exe) = std::env::current_exe() else { return };
+            let Ok(exe) = crate::exe() else { return };
             crate::audio::spawn(&[&exe.display().to_string(), "record-chooser"]);
         });
         record.set_valign(gtk::Align::Center);

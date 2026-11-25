@@ -151,7 +151,7 @@ fn stop_livewall() {
 }
 
 fn start_livewall(clip: &Path) {
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = crate::exe() else { return };
     let Ok(mut child) = Command::new(exe).arg("livewall").arg(clip).stdin(Stdio::null()).stdout(Stdio::null()).spawn() else { return };
     let _ = std::fs::create_dir_all(state_dir());
     let _ = std::fs::write(livewall_pid_file(), child.id().to_string());

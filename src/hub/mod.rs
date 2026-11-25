@@ -405,8 +405,9 @@ impl Hub {
                     let was_running = shown_running.replace(running);
                     // Finished: "done" shows for 3 s, then idle; a busy
                     // machine can miss the first, so either counts.
-                    if was_running && !running && updates::run(&text).is_none_or(|r| r.phase == "done") {
-                        hub.reopen();
+                    // If the new hub can't start, this one stays and shows
+                    // the result.
+                    if was_running && !running && updates::run(&text).is_none_or(|r| r.phase == "done") && hub.reopen() {
                         return glib::ControlFlow::Break;
                     }
                     *hub.run_text.borrow_mut() = text;
@@ -430,15 +431,19 @@ impl Hub {
 
     /// Closes this hub and opens the installed one on the Updates page. The
     /// new one waits until this process has exited and let go of its D-Bus
-    /// name, else it would only hand this one the command line.
-    fn reopen(&self) {
+    /// name, else it would only hand this one the command line. False if
+    /// the new one couldn't be started, and this one stays.
+    fn reopen(&self) -> bool {
         use std::os::unix::process::CommandExt;
-        let Ok(exe) = std::env::current_exe() else { return };
+        let Ok(exe) = crate::exe() else { return false };
         let script = "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; exec \"$0\" hub updates";
-        let _ = std::process::Command::new("sh").args(["-c", script]).arg(exe).arg(std::process::id().to_string()).process_group(0).stdin(std::process::Stdio::null()).spawn();
+        if std::process::Command::new("sh").args(["-c", script]).arg(exe).arg(std::process::id().to_string()).process_group(0).stdin(std::process::Stdio::null()).spawn().is_err() {
+            return false;
+        }
         if let Some(app) = self.window.application() {
             app.quit();
         }
+        true
     }
 
     /// Runs the update check in the background, then redraws the page.
@@ -1228,7 +1233,7 @@ impl Hub {
 
     /// Asks the running shell to quit, then starts a fresh one on the saved settings.
     fn restart_shell(self: &Rc<Self>) {
-        let Ok(exe) = std::env::current_exe() else { return };
+        let Ok(exe) = crate::exe() else { return };
         self.restarting.set(true);
         self.show_footer();
         let (done, finished) = async_channel::bounded::<()>(1);

@@ -361,7 +361,7 @@ pub fn stop() {
 /// background.
 fn spawn_self(args: &[String]) {
     use std::os::unix::process::CommandExt;
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = crate::exe() else { return };
     if let Ok(mut child) = std::process::Command::new(exe).args(args).process_group(0).stdin(std::process::Stdio::null()).spawn() {
         std::thread::spawn(move || {
             let _ = child.wait();

@@ -59,7 +59,7 @@ const CATALOG: &[Action] = &[
 ];
 
 fn shell(args: &[&str]) {
-    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "eclipse-shell".into());
+    let exe = crate::exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "eclipse-shell".into());
     let mut argv = vec![exe.as_str()];
     argv.extend_from_slice(args);
     crate::audio::spawn(&argv);

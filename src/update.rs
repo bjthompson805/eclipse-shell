@@ -142,7 +142,7 @@ pub fn start() -> std::io::Result<()> {
     let Some((terminal, flags)) = TERMINALS.iter().find(|(t, _)| glib::find_program_in_path(t).is_some()) else {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no terminal found (foot, kitty, alacritty or xterm)"));
     };
-    let exe = std::env::current_exe()?;
+    let exe = crate::exe()?;
     crate::hyprland::eval(&format!("hl.window_rule({{ name = \"eclipse-update\", match = {{ class = \"^({TERMINAL_CLASS})$\" }}, float = true, size = {{ 1000, 620 }}, center = true }})"));
     Command::new(terminal).args(*flags).args(["sh", "-c", WRAPPER]).arg(exe).process_group(0).stdin(std::process::Stdio::null()).spawn().map(|_| ())
 }

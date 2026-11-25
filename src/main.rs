@@ -323,10 +323,21 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     Some(Surfaces { launcher, power, calendar, usage, mixer, display: display_popout, network, bluetooth, media: media_popout, weather: weather_popout, traffic: traffic_popout, workspaces: workspaces_popout, overview, inbox, clipboard, osd, profile, controls, wallpapers, battery, window, resources, shell })
 }
 
+static EXE: std::sync::OnceLock<std::io::Result<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// This binary's path, as it was at startup. An update replaces the file,
+/// and FreeBSD then answers current_exe with ENOENT for every process still
+/// running the old one: the hub never handed over to the new build and the
+/// shell couldn't open the hub.
+pub fn exe() -> std::io::Result<std::path::PathBuf> {
+    EXE.get_or_init(std::env::current_exe).as_ref().map(Clone::clone).map_err(|e| std::io::Error::new(e.kind(), e.to_string()))
+}
+
 /// The first instance runs the shell. Later invocations, e.g.
 /// `eclipse-shell toggle-launcher` from a keybinding, are forwarded to it over
 /// D-Bus by GApplication and exit straight away.
 fn main() -> glib::ExitCode {
+    let _ = exe();
     // The live wallpaper runs as a process of its own, without GTK.
     let args: Vec<String> = std::env::args().collect();
     // The wallpaper browser is an app of its own.

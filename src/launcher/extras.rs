@@ -185,7 +185,7 @@ fn bubble(s: f64, glyph: &str, name: &str) -> gtk::Overlay {
     bubble.set_child(Some(&back));
     bubble.add_overlay(&column);
     popout::on_click(&bubble, || {
-        let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "eclipse-shell".into());
+        let exe = crate::exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "eclipse-shell".into());
         crate::audio::spawn(&[&exe, "toggle-bluetooth"]);
     });
     bubble

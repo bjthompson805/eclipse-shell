@@ -706,7 +706,7 @@ impl Walls {
 
     /// Sets `path` through the shell; `keep_colours` leaves the palette be.
     fn set_wallpaper(self: &Rc<Self>, path: &std::path::Path, keep_colours: bool) {
-        let shell = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("eclipse-shell"));
+        let shell = crate::exe().unwrap_or_else(|_| PathBuf::from("eclipse-shell"));
         let mut command = std::process::Command::new(shell);
         command.arg("wallpaper-set");
         if keep_colours {
