@@ -44,8 +44,9 @@ const CATALOG: &[Action] = &[
     Action { name: "Wallpaper Switcher", keywords: "background pick", glyph: "wallpaper", tab: "Look", run: Run::Shell(&["toggle-wallpapers"]) },
     Action { name: "Night Light", keywords: "warm blue light hyprsunset", glyph: "nightlight", tab: "Look", run: Run::Sh("pkill -x hyprsunset || hyprsunset -t 4500") },
     Action { name: "Display", keywords: "brightness vibrance", glyph: "light_mode", tab: "Look", run: Run::Shell(&["toggle-display"]) },
-    Action { name: "Screenshot Area", keywords: "capture grab snip region", glyph: "screenshot_region", tab: "Tools", run: Run::Sh("sleep 0.3; d=\"$HOME/Pictures/Screenshots\"; mkdir -p \"$d\"; f=\"$d/$(date +%Y-%m-%d_%H-%M-%S).png\"; g=\"$(slurp)\" && grim -g \"$g\" \"$f\" && wl-copy < \"$f\" && notify-send -i \"$f\" Screenshot \"Saved and copied\"") },
-    Action { name: "Screenshot Screen", keywords: "capture grab full", glyph: "screenshot_monitor", tab: "Tools", run: Run::Sh("sleep 0.4; d=\"$HOME/Pictures/Screenshots\"; mkdir -p \"$d\"; f=\"$d/$(date +%Y-%m-%d_%H-%M-%S).png\"; grim \"$f\" && wl-copy < \"$f\" && notify-send -i \"$f\" Screenshot \"Saved and copied\"") },
+    // After a beat, so the launcher has gone before the screens freeze.
+    Action { name: "Screenshot", keywords: "capture grab snip region window annotate", glyph: "screenshot_region", tab: "Tools", run: Run::Sh("sleep 0.3; exec eclipse-shell screenshot") },
+    Action { name: "Screenshot Monitor", keywords: "capture grab full screen display", glyph: "screenshot_monitor", tab: "Tools", run: Run::Sh("sleep 0.3; exec eclipse-shell screenshot monitor") },
     Action { name: "Colour Picker", keywords: "color eyedropper hex pick", glyph: "colorize", tab: "Tools", run: Run::Sh("sleep 0.3; c=\"$(hyprpicker -a)\" && notify-send \"Colour copied\" \"$c\"") },
     Action { name: "Play / Pause", keywords: "music media toggle", glyph: "play_pause", tab: "Media", run: Run::Sh("playerctl play-pause") },
     Action { name: "Next Track", keywords: "music media skip", glyph: "skip_next", tab: "Media", run: Run::Sh("playerctl next") },

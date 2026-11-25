@@ -34,7 +34,7 @@ if command -v doas >/dev/null 2>&1; then as_root=doas; else as_root=sudo; fi
 
 # ---- packages ----------------------------------------------------------------
 
-packages="gtk4 adwaita-icon-theme gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks wf-recorder slurp"
+packages="gtk4 adwaita-icon-theme gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks wf-recorder slurp grim wl-clipboard cliphist"
 if [ $system -eq 1 ]; then
 	# Ask for the password once, up front, so a missing tty fails here.
 	if [ "$as_root" = sudo ] && ! sudo -v; then
@@ -219,6 +219,29 @@ EOF
 			printf -- '-- eclipse-shell (added by its install.sh)\nrequire("eclipse_shell")\n' >"$hypr/hyprland.lua"
 		fi
 		say "added eclipse-shell to Hyprland's startup (~/.config/hypr/eclipse_shell.lua)"
+	fi
+fi
+
+# ---- screenshot keys ---------------------------------------------------------
+
+# Print takes a screenshot of a region or window, Shift+Print of a monitor.
+# They live in eclipse_capture.lua, which the screenshot toolbar's gear
+# rewrites. Written once, for a Lua config, and only when nothing in it binds
+# Print already: an existing bind is never doubled up or replaced.
+capture="$hypr/eclipse_capture.lua"
+if [ -f "$hypr/hyprland.lua" ] && [ ! -f "$capture" ]; then
+	if grep -rqsE --include='*.lua' --exclude='*.bak*' --exclude='*.pre-*' '^[^-]*hl\.bind\("([A-Z]+ \+ )*Print"' "$hypr"; then
+		say "Print is bound in your Hyprland config already; screenshot keys not added (run $bin screenshot)"
+	else
+		cat >"$capture" <<EOF
+-- eclipse-shell screenshot keys. Written by install.sh; the screenshot
+-- toolbar's gear rewrites the first bind when you record a new key.
+hl.bind("Print", hl.dsp.exec_cmd("$bin screenshot"))
+hl.bind("SHIFT + Print", hl.dsp.exec_cmd("$bin screenshot monitor"))
+EOF
+		cp -p "$hypr/hyprland.lua" "$hypr/hyprland.lua.pre-capture"
+		printf '\n-- eclipse-shell screenshot keys (added by its install.sh)\nrequire("eclipse_capture")\n' >>"$hypr/hyprland.lua"
+		say "bound Print and Shift+Print to the screenshot tool (~/.config/hypr/eclipse_capture.lua)"
 	fi
 fi
 
