@@ -1,7 +1,7 @@
 //! The recording island: a control that melts out of the screen frame, in
 //! the frame's own colour, so it reads as part of the shell (ryoku's
 //! FloatingIsland and RecordHud). Before a recording it's the chooser:
-//! region or whole monitor, desktop audio, mic, then Quick or close. While
+//! region or whole monitor, desktop audio, mic, then Record or close. While
 //! recording: a pulsing dot, the elapsed time, stop, speaker and mic mutes,
 //! and hide, which tucks it back into the frame as a small nub that hovering
 //! brings out again.
@@ -114,7 +114,11 @@ impl Hud {
         fixed.put(&shape, 0.0, 0.0);
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         fixed.put(&body, 0.0, 0.0);
-        window.set_child(Some(&fixed));
+        // The buttons' hover hints float over everything.
+        let layers = gtk::Overlay::new();
+        layers.set_child(Some(&fixed));
+        layers.add_overlay(&crate::hint::layer());
+        window.set_child(Some(&layers));
 
         let hud = Rc::new(Self {
             window,
@@ -556,7 +560,7 @@ impl Hud {
             let _ = cr.fill();
         });
         row.append(&divider);
-        row.append(&quick_button(s));
+        row.append(&record_button(s));
         row.append(&icon_button(s, "close", SUBTLE, "Close", super::close_chooser));
     }
 
@@ -691,9 +695,9 @@ fn grip(s: f64) -> gtk::DrawingArea {
     grip
 }
 
-/// The chooser's labelled "Quick" action: a record glyph and a caption on a
+/// The chooser's labelled "Record" action: a record glyph and a caption on a
 /// faint red tile.
-fn quick_button(s: f64) -> gtk::Overlay {
+fn record_button(s: f64) -> gtk::Overlay {
     let px = |v: f64| (v * s).round() as i32;
     let hovered = Rc::new(Cell::new(false));
     let back = gtk::DrawingArea::new();
@@ -711,7 +715,7 @@ fn quick_button(s: f64) -> gtk::Overlay {
     row.set_margin_top(px(4.0));
     row.set_margin_bottom(px(4.0));
     row.append(&theme::filled_icon_glyph("fiber_manual_record", 14.0 * s, RED));
-    let label = TextStyle::new(9.5 * s, pango::Weight::Semibold, RED).mono().tracking(0.8 * s).label("Quick");
+    let label = TextStyle::new(9.5 * s, pango::Weight::Semibold, RED).mono().tracking(0.8 * s).label("Record");
     row.append(&label);
     let button = gtk::Overlay::new();
     button.set_child(Some(&back));
@@ -720,7 +724,7 @@ fn quick_button(s: f64) -> gtk::Overlay {
     button.set_valign(gtk::Align::Center);
     button.set_halign(gtk::Align::Center);
     button.set_cursor_from_name(Some("pointer"));
-    button.set_tooltip_text(Some("Start recording"));
+    crate::hint::float_label(&button, s, "Start recording");
     popout::on_hover(&button, {
         let back = back.downgrade();
         move |inside| {

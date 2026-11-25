@@ -173,7 +173,7 @@ struct State {
     /// the whole monitor.
     region: Option<String>,
     chooser_open: bool,
-    /// Between "Quick" and the recorder starting, so the chooser is gone
+    /// Between "Record" and the recorder starting, so the chooser is gone
     /// before the first frame.
     starting: bool,
     desktop_audio: bool,
@@ -308,7 +308,7 @@ pub fn valid_geometry(g: &str) -> bool {
     [w, h, x, y].iter().all(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
-/// The chooser's "Quick": records the region, or after a moment for the
+/// The chooser's "Record": records the region, or after a moment for the
 /// chooser to leave the screen, the monitor.
 fn start_quick() {
     let (desktop, mic) = audio_choices();
@@ -441,7 +441,8 @@ fn icon_button(s: f64, glyph: &str, tint: Rgba, hint: &str, pressed: impl Fn() +
     button.add_overlay(&icon);
     button.set_valign(gtk::Align::Center);
     button.set_cursor_from_name(Some("pointer"));
-    button.set_tooltip_text(Some(hint));
+    // Shown at once, on the window's hint layer.
+    crate::hint::float_label(&button, s, hint);
     button.update_property(&[gtk::accessible::Property::Label(hint)]);
     crate::popout::on_hover(&button, {
         let back = back.downgrade();

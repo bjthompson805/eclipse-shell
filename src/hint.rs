@@ -53,52 +53,89 @@ pub fn framed(s: f64, label: &gtk::Label, pad_x: f64, pad_y: f64) -> gtk::Overla
     pill
 }
 
+const LAYER_NAME: &str = "eclipse-hints";
+
 /// A layer, laid over a whole window, that hints float on. It never takes
 /// the pointer.
 pub fn layer() -> gtk::Fixed {
-    gtk::Fixed::builder().can_target(false).build()
+    gtk::Fixed::builder().can_target(false).name(LAYER_NAME).build()
 }
 
 /// Shows `text` on `layer`, centred under `widget` with its top at `y`, while
 /// the pointer is over `widget`.
 pub fn float_under(widget: &impl IsA<gtk::Widget>, layer: &gtk::Fixed, s: f64, y: f64, text: &str) {
     let text = text.to_owned();
-    float(widget, layer, s, Some(y), move || pill(s, &text));
+    let layer = layer.downgrade();
+    float(widget, move |_| layer.upgrade(), s, Some(y), move || pill(s, &text));
 }
 
 /// Shows what `make` builds on `layer`, just below `widget` and centred on
 /// it, while the pointer is over `widget`.
 pub fn float_below(widget: &impl IsA<gtk::Widget>, layer: &gtk::Fixed, s: f64, make: impl Fn() -> gtk::Overlay + 'static) {
-    float(widget, layer, s, None, make);
+    let layer = layer.downgrade();
+    float(widget, move |_| layer.upgrade(), s, None, make);
 }
 
-/// `y` is the hint's top on the layer, or None for just below the widget.
-fn float(widget: &impl IsA<gtk::Widget>, layer: &gtk::Fixed, s: f64, y: Option<f64>, make: impl Fn() -> gtk::Overlay + 'static) {
-    let (widget_ref, layer) = (widget.as_ref().downgrade(), layer.downgrade());
-    let shown: Rc<RefCell<Option<gtk::Overlay>>> = Rc::default();
+/// Shows `text` below `widget` (above, without room below) on its window's
+/// hint layer, found when hovered: for widgets built before they know their
+/// window. A window without a [`layer`] shows nothing.
+pub fn float_label(widget: &impl IsA<gtk::Widget>, s: f64, text: &str) {
+    let text = text.to_owned();
+    float(widget, find_layer, s, None, move || pill(s, &text));
+}
+
+/// The hint layer in `widget`'s window.
+fn find_layer(widget: &gtk::Widget) -> Option<gtk::Fixed> {
+    let root = widget.root()?.upcast::<gtk::Widget>();
+    let mut stack = vec![root];
+    while let Some(w) = stack.pop() {
+        if w.widget_name() == LAYER_NAME {
+            return w.downcast().ok();
+        }
+        let mut child = w.first_child();
+        while let Some(c) = child {
+            child = c.next_sibling();
+            stack.push(c);
+        }
+    }
+    None
+}
+
+/// `y` is the hint's top on the layer, or None for just below the widget
+/// (or just above it, when below would run off the layer).
+fn float(widget: &impl IsA<gtk::Widget>, layer: impl Fn(&gtk::Widget) -> Option<gtk::Fixed> + 'static, s: f64, y: Option<f64>, make: impl Fn() -> gtk::Overlay + 'static) {
+    let widget_ref = widget.as_ref().downgrade();
+    let shown: Rc<RefCell<Option<(gtk::Fixed, gtk::Overlay)>>> = Rc::default();
     // A widget removed while hovered never sees the pointer leave.
     widget.as_ref().connect_unmap({
-        let (layer, shown) = (layer.clone(), shown.clone());
+        let shown = shown.clone();
         move |_| {
-            if let (Some(layer), Some(old)) = (layer.upgrade(), shown.borrow_mut().take()) {
+            if let Some((layer, old)) = shown.borrow_mut().take() {
                 layer.remove(&old);
             }
         }
     });
     on_hover(widget, move |inside| {
-        let Some(layer) = layer.upgrade() else { return };
-        if let Some(old) = shown.borrow_mut().take() {
+        if let Some((layer, old)) = shown.borrow_mut().take() {
             layer.remove(&old);
         }
         let Some(widget) = widget_ref.upgrade().filter(|_| inside) else { return };
-        let point = gtk::graphene::Point::new(widget.width() as f32 / 2.0, widget.height() as f32);
-        let Some(anchor) = widget.compute_point(&layer, &point) else { return };
+        let Some(layer) = layer(&widget) else { return };
+        let Some(below) = widget.compute_point(&layer, &gtk::graphene::Point::new(widget.width() as f32 / 2.0, widget.height() as f32)) else { return };
         let hint = make();
         let width = f64::from(hint.measure(gtk::Orientation::Horizontal, -1).1);
+        let height = f64::from(hint.measure(gtk::Orientation::Vertical, -1).1);
         let edge = 6.0 * s;
-        let x = (f64::from(anchor.x()) - width / 2.0).clamp(edge, (f64::from(layer.width()) - width - edge).max(edge));
-        let top = y.unwrap_or(f64::from(anchor.y()) + 6.0 * s);
+        let x = (f64::from(below.x()) - width / 2.0).clamp(edge, (f64::from(layer.width()) - width - edge).max(edge));
+        let top = y.unwrap_or_else(|| {
+            let under = f64::from(below.y()) + 6.0 * s;
+            if under + height > f64::from(layer.height()) - edge && layer.height() > 0 {
+                f64::from(below.y()) - f64::from(widget.height()) - 6.0 * s - height
+            } else {
+                under
+            }
+        });
         layer.put(&hint, x.round(), top.round());
-        *shown.borrow_mut() = Some(hint);
+        *shown.borrow_mut() = Some((layer, hint));
     });
 }

@@ -95,6 +95,8 @@ impl Recorder {
         let layers = gtk::Overlay::new();
         layers.set_child(Some(&back));
         layers.add_overlay(&body);
+        // The buttons' hover hints float over everything.
+        layers.add_overlay(&crate::hint::layer());
         window.set_child(Some(&layers));
 
         let keys = gtk::EventControllerKey::new();
