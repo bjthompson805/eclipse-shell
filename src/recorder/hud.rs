@@ -90,6 +90,9 @@ pub struct Hud {
     /// The nub was hovered open; held a moment after the pointer leaves.
     revealed: Cell<bool>,
     reveal_leave: Cell<u32>,
+    /// The input region now (x, y, w, h), and whether the pointer is in it.
+    input: Cell<(f64, f64, f64, f64)>,
+    pointer_in: Cell<bool>,
     sink_muted: Cell<bool>,
     mic_muted: Cell<bool>,
     /// What the body last showed, so a tick of the clock doesn't rebuild it.
@@ -138,6 +141,8 @@ impl Hud {
             hidden: Cell::new(false),
             revealed: Cell::new(false),
             reveal_leave: Cell::new(0),
+            input: Cell::new((0.0, 0.0, 0.0, 0.0)),
+            pointer_in: Cell::new(false),
             sink_muted: Cell::new(false),
             mic_muted: Cell::new(false),
             key: RefCell::default(),
@@ -161,15 +166,22 @@ impl Hud {
                 glib::ControlFlow::Continue
             }
         });
-        // Hovering brings a tucked island out; leaving tucks it again after a moment.
+        // Hovering brings a tucked island out; leaving tucks it again after a
+        // moment. Judged by where the pointer is, not by enter and leave:
+        // tucking shrinks the input region out from under the pointer, and
+        // Hyprland sends no leave for that, so the next enter never came.
         let motion = gtk::EventControllerMotion::new();
         motion.connect_enter({
             let hud = Rc::downgrade(&hud);
-            move |_, _, _| hud.upgrade().into_iter().for_each(|h| h.hover(true))
+            move |_, x, y| hud.upgrade().into_iter().for_each(|h| h.track(Some((x, y))))
+        });
+        motion.connect_motion({
+            let hud = Rc::downgrade(&hud);
+            move |_, x, y| hud.upgrade().into_iter().for_each(|h| h.track(Some((x, y))))
         });
         motion.connect_leave({
             let hud = Rc::downgrade(&hud);
-            move |_| hud.upgrade().into_iter().for_each(|h| h.hover(false))
+            move |_| hud.upgrade().into_iter().for_each(|h| h.track(None))
         });
         hud.window.add_controller(motion);
         hud.wire_drag();
@@ -188,6 +200,15 @@ impl Hud {
         self.s.set(config::bar_scale(height));
         self.key.borrow_mut().clear();
         *self.monitor.borrow_mut() = monitor;
+    }
+
+    /// The pointer moved to `at` on the window, or left it.
+    fn track(self: &Rc<Self>, at: Option<(f64, f64)>) {
+        let (rx, ry, rw, rh) = self.input.get();
+        let inside = at.is_some_and(|(x, y)| x >= rx && x < rx + rw && y >= ry && y < ry + rh);
+        if self.pointer_in.replace(inside) != inside {
+            self.hover(inside);
+        }
     }
 
     fn hover(self: &Rc<Self>, inside: bool) {
@@ -402,6 +423,7 @@ impl Hud {
             } else {
                 (bx0, by0, bx1 - bx0, by1 - by0)
             };
+            self.input.set(region);
             let r = cairo::RectangleInt::new(region.0.floor() as i32, region.1.floor() as i32, region.2.ceil() as i32, region.3.ceil() as i32);
             surface.set_input_region(Some(&cairo::Region::create_rectangle(&r)));
         }
@@ -540,6 +562,9 @@ impl Hud {
                 if let Some(hud) = hud.upgrade() {
                     hud.hidden.set(!tucked);
                     hud.revealed.set(false);
+                    // The nub shrinks out from under the pointer: it's out,
+                    // so coming back onto the nub reveals it.
+                    hud.pointer_in.set(false);
                     hud.update();
                 }
             }));
