@@ -5,14 +5,15 @@
 //!   (run in its own process, so a recording outlives whoever asked for it).
 //! - The state here: whether a recording runs, reconciled against the live
 //!   process, its elapsed time, and the chooser's choices.
-//! - [`hud`]: the floating control at the bottom of the screen: the chooser
+//! - [`hud`]: the island that melts out of the frame edge: the chooser
 //!   before a recording, the timer and stop during one.
-//! - [`deck`]: the bar module's popout: record or stop, and recent recordings.
+//! - [`deck`]: the right sidebar's Record tab: record or stop, and every
+//!   recording.
 //! - [`app`]: Eclipse Recorder, the settings and every recording.
 
 pub mod app;
 pub mod cli;
-mod deck;
+pub mod deck;
 mod hud;
 
 use std::cell::{Cell, RefCell};
@@ -25,7 +26,7 @@ use gtk::{gdk, gio, glib, pango};
 use gtk4 as gtk;
 use serde::{Deserialize, Serialize};
 
-use crate::theme::{self, Rgba, TextStyle, CREAM, SUBTLE};
+use crate::theme::{self, Rgba, TextStyle, CREAM};
 
 /// The recording red, for the dot, the REC tag and stop.
 pub const RED: Rgba = Rgba::rgb8(0xe2, 0x4b, 0x3f);
@@ -182,7 +183,7 @@ struct State {
 thread_local! {
     static STATE: RefCell<State> = RefCell::default();
     static LISTENERS: RefCell<Vec<Rc<dyn Fn()>>> = RefCell::default();
-    static SURFACES: RefCell<Option<(Rc<hud::Hud>, Rc<deck::Deck>)>> = const { RefCell::new(None) };
+    static HUD: RefCell<Option<Rc<hud::Hud>>> = const { RefCell::new(None) };
     /// Bumped by every poll scheduled, so only the newest one reschedules.
     static POLLS: Cell<u32> = const { Cell::new(0) };
 }
@@ -232,12 +233,11 @@ fn set(f: impl FnOnce(&mut State)) {
     changed();
 }
 
-/// Sets up the HUD and the deck and starts following wf-recorder. Called
-/// once, as the shell starts.
+/// Sets up the island and starts following wf-recorder. Called once, as the
+/// shell starts.
 pub fn start(app: &gtk::Application) {
     let hud = hud::Hud::new(app);
-    let deck = deck::Deck::new(app);
-    SURFACES.with_borrow_mut(|s| *s = Some((hud, deck)));
+    HUD.with_borrow_mut(|h| *h = Some(hud));
     // The clock: once a second while recording.
     glib::timeout_add_seconds_local(1, || {
         if active() {
@@ -249,41 +249,28 @@ pub fn start(app: &gtk::Application) {
 }
 
 pub fn set_monitor(monitor: Option<gdk::Monitor>) {
-    SURFACES.with_borrow(|s| {
-        if let Some((hud, deck)) = s {
-            hud.set_monitor(monitor.clone());
-            deck.set_monitor(monitor);
+    HUD.with_borrow(|h| {
+        if let Some(hud) = h {
+            hud.set_monitor(monitor);
         }
     });
 }
 
-/// Opens the deck under `x` on `monitor`, or against the bar's right end.
-pub fn toggle_deck(under: Option<(f64, Option<gdk::Monitor>)>) {
-    let deck = SURFACES.with_borrow(|s| s.as_ref().map(|(_, d)| d.clone()));
-    if let Some(deck) = deck {
-        deck.toggle(under);
-    }
-}
-
-/// Opens the HUD's chooser, the step before a recording.
+/// Melts the island's chooser out of the frame, the step before a recording.
 pub fn open_chooser() {
     if active() {
         return;
     }
-    // The deck never stays in the frame.
-    hide_deck();
     set(|s| s.chooser_open = true);
+}
+
+/// `record-chooser`: opens the chooser, or melts an open one back in.
+pub fn toggle_chooser() {
+    if chooser_open() { close_chooser() } else { open_chooser() }
 }
 
 pub fn close_chooser() {
     set(|s| s.chooser_open = false);
-}
-
-fn hide_deck() {
-    let deck = SURFACES.with_borrow(|s| s.as_ref().map(|(_, d)| d.clone()));
-    if let Some(deck) = deck {
-        deck.hide();
-    }
 }
 
 fn toggle_desktop_audio() {
@@ -474,30 +461,4 @@ fn clock_label(px: f64) -> gtk::Label {
     attrs.insert(pango::AttrFontFeatures::new("tnum 1"));
     label.set_attributes(Some(&attrs));
     label
-}
-
-/// The bar module's face: a record glyph, or while recording a pulsing dot
-/// and the elapsed time.
-pub fn bar_glyph(s: f64) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, (6.0 * s).round() as i32);
-    let idle = theme::icon_glyph("radio_button_checked", 14.0 * s, SUBTLE);
-    let dot = pulse_dot(8.0 * s, RED);
-    let time = clock_label(11.0 * s);
-    row.append(&idle);
-    row.append(&dot);
-    row.append(&time);
-    let paint = {
-        let (idle, dot, time) = (idle.downgrade(), dot.downgrade(), time.downgrade());
-        move || {
-            let (Some(idle), Some(dot), Some(time)) = (idle.upgrade(), dot.upgrade(), time.upgrade()) else { return };
-            let on = active();
-            idle.set_visible(!on);
-            dot.set_visible(on);
-            time.set_visible(on);
-            time.set_text(&elapsed_text(elapsed()));
-        }
-    };
-    paint();
-    on_change(paint);
-    row
 }

@@ -76,7 +76,6 @@ struct Anchors {
     traffic: Option<gtk::Widget>,
     bell: Option<gtk::Widget>,
     battery: Option<gtk::Widget>,
-    recorder: Option<gtk::Widget>,
 }
 
 pub struct Bar {
@@ -233,12 +232,6 @@ impl Bar {
         centre_x(self.anchors.bell.as_ref()?)
     }
 
-    /// Where the recorder's centre sits, and on which monitor, if the bar shows it.
-    pub fn recorder_at(&self) -> Option<(f64, Option<gdk::Monitor>)> {
-        let widget = self.anchors.recorder.as_ref()?;
-        Some((centre_x(widget)?, monitor_of(widget)))
-    }
-
     /// Where the battery's centre sits, if the bar shows it.
     pub fn battery_x(&self) -> Option<f64> {
         self.anchors.battery.as_ref().filter(|b| b.is_visible()).and_then(centre_x)
@@ -265,12 +258,6 @@ pub(super) fn centre_x(widget: &gtk::Widget) -> Option<f64> {
 }
 
 /// Waits for whichever finishes first.
-/// The monitor a widget's window is on.
-fn monitor_of(widget: &gtk::Widget) -> Option<gdk::Monitor> {
-    let surface = widget.native()?.surface()?;
-    surface.display().monitor_at_surface(&surface)
-}
-
 pub(crate) async fn first_of(a: impl std::future::Future<Output = ()>, b: impl std::future::Future) {
     let (a, b) = (std::pin::pin!(a), std::pin::pin!(b));
     let mut both = (a, b);
@@ -507,20 +494,6 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         let tray = Module::new(&icons, ModuleSpec { interactive: false, ..pill(11.0 * s) });
         icons.bind_property("visible", &tray.widget, "visible").sync_create().build();
         right.append(&tray.widget);
-    }
-    if config::get().bar_recorder {
-        let recorder = Module::new(&crate::recorder::bar_glyph(s), pill(10.0 * s));
-        recorder.connect_tapped({
-            let pill = recorder.widget.downgrade();
-            move || {
-                let Some(pill) = pill.upgrade() else { return };
-                if let Some(x) = centre_x(pill.upcast_ref()) {
-                    crate::recorder::toggle_deck(Some((x, monitor_of(pill.upcast_ref()))));
-                }
-            }
-        });
-        anchors.recorder = Some(recorder.widget.clone().upcast());
-        right.append(&recorder.widget);
     }
     let bell = Module::new(&bell::bell(s), pill(10.0 * s));
     bell.connect_tapped({

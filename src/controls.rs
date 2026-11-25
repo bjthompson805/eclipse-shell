@@ -1,7 +1,8 @@
 //! The right sidebar: quick controls over a tabbed glance. A clock and the
 //! weather, quick toggles (Wi-Fi, Bluetooth, do not disturb, night light,
 //! always on, microphone, airplane mode), volume and brightness faders, then a tab rail
-//! over notifications, the calendar, now playing and the forecast.
+//! over notifications, the calendar, now playing, the forecast and the
+//! screen recorder with its recordings.
 //!
 //! The tab panes are the popouts' own cards, each popout built a second time
 //! on a [`Popout::pane`] here, so they stay identical and keep their own live
@@ -23,6 +24,7 @@ use crate::hint;
 use crate::inbox_popout::InboxPopout;
 use crate::media_popout::MediaPopout;
 use crate::popout::{self, Popout};
+use crate::recorder::deck::Deck;
 use crate::sidebar::{Side, Sidebar};
 use crate::theme::{self, TextStyle, BRIGHT, CREAM, DIM, FAINT, ICON_DIM, SUBTLE};
 use crate::weather_popout::WeatherPopout;
@@ -79,18 +81,24 @@ impl Controls {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
         let sidebar = Sidebar::new(app, Side::Right, "eclipse-shell-controls", WIDTH);
         let holder = || gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let (h_inbox, h_calendar, h_media, h_weather) = (holder(), holder(), holder(), holder());
+        let (h_inbox, h_calendar, h_media, h_weather, h_record) = (holder(), holder(), holder(), holder(), holder());
         let pane_popout = |h: &gtk::Box| Popout::pane(app, h, sidebar.hints(), 1.0);
-        let (p_inbox, p_calendar, p_media, p_weather) = (pane_popout(&h_inbox), pane_popout(&h_calendar), pane_popout(&h_media), pane_popout(&h_weather));
+        let (p_inbox, p_calendar, p_media, p_weather, p_record) = (pane_popout(&h_inbox), pane_popout(&h_calendar), pane_popout(&h_media), pane_popout(&h_weather), pane_popout(&h_record));
         let inbox = InboxPopout::with_popout(p_inbox.clone());
         let calendar = Calendar::with_popout(p_calendar.clone());
         let media = MediaPopout::with_popout(p_media.clone());
         let weather = WeatherPopout::with_popout(p_weather.clone());
+        let close: Rc<dyn Fn()> = {
+            let sidebar = Rc::downgrade(&sidebar);
+            Rc::new(move || sidebar.upgrade().into_iter().for_each(|s| s.hide()))
+        };
+        let record = Deck::with_popout(p_record.clone(), close);
         let panes = vec![
             Pane { glyph: "notifications", name: "Inbox", popout: p_inbox, open: Box::new(move || inbox.toggle(0.0)) },
             Pane { glyph: "calendar_month", name: "Calendar", popout: p_calendar, open: Box::new(move || calendar.toggle(0.0)) },
             Pane { glyph: "music_note", name: "Media", popout: p_media, open: Box::new(move || media.toggle(0.0)) },
             Pane { glyph: "partly_cloudy_day", name: "Weather", popout: p_weather, open: Box::new(move || weather.toggle(0.0)) },
+            Pane { glyph: "radio_button_checked", name: "Record", popout: p_record, open: Box::new(move || record.toggle()) },
         ];
 
         restore_awake();
@@ -107,7 +115,7 @@ impl Controls {
             rail: RefCell::default(),
             weather: RefCell::default(),
         });
-        let holders = [h_inbox, h_calendar, h_media, h_weather];
+        let holders = [h_inbox, h_calendar, h_media, h_weather, h_record];
         controls.sidebar.connect_open({
             let controls = Rc::downgrade(&controls);
             move |open, s| {
@@ -146,7 +154,19 @@ impl Controls {
         &self.sidebar
     }
 
-    fn build(self: &Rc<Self>, s: f64, holders: &[gtk::Box; 4]) {
+    /// Opens the sidebar on the Record tab (the launcher's Screen Recorder).
+    pub fn show_record(self: &Rc<Self>) {
+        let Some(index) = self.panes.iter().position(|p| p.name == "Record") else { return };
+        self.chosen.set(index);
+        if self.open.get() {
+            self.open_pane(index);
+            self.show_rail(self.sidebar.scale());
+        } else {
+            self.sidebar.toggle();
+        }
+    }
+
+    fn build(self: &Rc<Self>, s: f64, holders: &[gtk::Box; 5]) {
         let px = |v: f64| (v * s).round() as i32;
         let column = gtk::Box::new(gtk::Orientation::Vertical, px(16.0));
         column.set_margin_start(px(16.0));

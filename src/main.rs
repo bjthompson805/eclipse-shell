@@ -555,14 +555,14 @@ fn main() -> glib::ExitCode {
                     surfaces.wallpapers.toggle();
                 }
             }
+            // The right sidebar, on its Record tab.
             Some("toggle-recorder") => {
                 if let Some(surfaces) = surfaces.get() {
-                    let shell = surfaces.shell.borrow();
-                    let at = shell.focused_bar().and_then(Bar::recorder_at);
-                    recorder::toggle_deck(at);
+                    let controls = surfaces.shell.borrow().controls.clone();
+                    controls.show_record();
                 }
             }
-            Some("record-chooser") => recorder::open_chooser(),
+            Some("record-chooser") => recorder::toggle_chooser(),
             Some("wallpaper-next") => wallpaper::next(),
             Some("wallpaper-set") => {
                 // --keep-colours: show it without re-theming the desktop.

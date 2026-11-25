@@ -53,8 +53,6 @@ pub struct Settings {
     pub bar_weather: bool,
     /// Show system tray icons.
     pub bar_tray: bool,
-    /// Show the screen recorder: its deck, and the time while recording.
-    pub bar_recorder: bool,
     /// Show the playing track.
     pub bar_media: bool,
 
@@ -95,7 +93,6 @@ impl Default for Settings {
             bar_status: true,
             bar_weather: true,
             bar_tray: true,
-            bar_recorder: true,
             bar_media: true,
             occupied_workspaces_only: true,
             workspace_icons: true,

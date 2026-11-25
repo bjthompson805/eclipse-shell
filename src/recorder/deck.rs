@@ -1,36 +1,37 @@
-//! The recorder's popout, dropping from its bar module: recording control and
-//! the latest recordings under one roof. While recording, a pulsing REC tag,
-//! the elapsed time and stop; otherwise a Record button that closes the deck
-//! and opens the HUD's chooser, so the deck is never in the frame. Below,
-//! the four most recent recordings, each with play, folder and trash.
+//! The recorder's tab in the right sidebar (ryoku's record deck): recording
+//! control and the recordings under one roof. While recording, a pulsing REC
+//! tag, the elapsed time and stop; otherwise a Record button that closes the
+//! sidebar and melts the island's chooser out of the frame, so the sidebar
+//! is never in the shot. Below, every recording, newest first, each with
+//! play, folder and trash; the sidebar scrolls through them.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
 use gtk::prelude::*;
-use gtk::{gdk, glib, pango};
+use gtk::{glib, pango};
 use gtk4 as gtk;
 
-use super::{active, clock_label, elapsed, elapsed_text, icon_button, pulse_dot, recordings, recordings_dir, RED};
-use crate::popout::{self, Anchor, Popout};
+use super::{active, clock_label, elapsed, elapsed_text, icon_button, recordings, recordings_dir, RED};
+use crate::popout::{self, Popout};
 use crate::theme::{self, TextStyle, CREAM, DIM, FAINT, SUBTLE};
 
-const NAMESPACE: &str = "eclipse-shell-recorder-deck";
-const WIDTH: f64 = 320.0;
-/// Recordings the deck lists; Eclipse Recorder has them all.
-const SHOWN: usize = 4;
+const WIDTH: f64 = 360.0;
 
 pub struct Deck {
     popout: Rc<Popout>,
+    /// Closes the sidebar the deck sits in.
+    close: Rc<dyn Fn()>,
     /// Whether the card shows the running controls, to rebuild on a change.
     was_active: Cell<bool>,
     clock: RefCell<Option<gtk::Label>>,
 }
 
 impl Deck {
-    pub fn new(app: &gtk::Application) -> Rc<Self> {
-        let deck = Rc::new(Self { popout: Popout::new(app, NAMESPACE), was_active: Cell::new(false), clock: RefCell::default() });
+    /// The deck on `host`, a sidebar pane; `close` shuts the sidebar.
+    pub fn with_popout(host: Rc<Popout>, close: Rc<dyn Fn()>) -> Rc<Self> {
+        let deck = Rc::new(Self { popout: host, close, was_active: Cell::new(false), clock: RefCell::default() });
         super::on_change({
             let deck = Rc::downgrade(&deck);
             move || {
@@ -55,32 +56,13 @@ impl Deck {
         deck
     }
 
-    pub fn set_monitor(&self, monitor: Option<gdk::Monitor>) {
-        if !self.popout.is_open() {
-            self.popout.set_monitor(monitor);
-        }
-    }
-
-    pub fn hide(self: &Rc<Self>) {
-        self.popout.hide();
-    }
-
-    /// Opens under `x` on its monitor, or against the bar's right end.
-    pub fn toggle(self: &Rc<Self>, under: Option<(f64, Option<gdk::Monitor>)>) {
+    /// Opens the pane (the sidebar calls this as the tab is chosen).
+    pub fn toggle(self: &Rc<Self>) {
         if self.popout.is_open() {
             return self.popout.hide();
         }
-        let anchor = match under {
-            Some((x, monitor)) => {
-                if monitor.is_some() {
-                    self.popout.set_monitor(monitor);
-                }
-                Anchor::Under(x)
-            }
-            None => Anchor::Right,
-        };
         self.rebuild();
-        self.popout.show(anchor);
+        self.popout.show(popout::Anchor::Under(0.0));
     }
 
     fn rebuild(self: &Rc<Self>) {
@@ -119,15 +101,17 @@ impl Deck {
             let tag = TextStyle::new(9.5 * s, pango::Weight::Bold, CREAM).mono().tracking(1.2 * s).label("REC");
             tag.set_margin_start(px(7.0));
             tag.set_margin_end(px(7.0));
-            let tag_back = pulse_dot(1.0, RED);
-            tag_back.set_halign(gtk::Align::Fill);
-            tag_back.set_valign(gtk::Align::Fill);
+            let tag_back = gtk::DrawingArea::new();
             tag_back.set_draw_func(move |area, cr, w, h| {
                 let t = area.frame_clock().map_or(0.0, |c| c.frame_time() as f64 / 1e6);
                 let alpha = 0.18 + 0.82 * (0.5 + 0.5 * (t * std::f64::consts::TAU / 1.24).cos());
                 cr.rectangle(0.0, 0.0, f64::from(w), f64::from(h));
                 theme::set_source(cr, RED.alpha(alpha));
                 let _ = cr.fill();
+            });
+            tag_back.add_tick_callback(|area, _| {
+                area.queue_draw();
+                glib::ControlFlow::Continue
             });
             let pill = gtk::Overlay::new();
             pill.set_child(Some(&tag_back));
@@ -143,11 +127,9 @@ impl Deck {
             row.append(&icon_button(s, "stop", RED, "Stop recording", super::stop));
             column.append(&row);
         } else {
-            let deck = Rc::downgrade(self);
+            let close = self.close.clone();
             let button = crate::walls::ui::button(s, Some("fiber_manual_record"), "RECORD", false, true, move || {
-                if let Some(deck) = deck.upgrade() {
-                    deck.popout.hide();
-                }
+                close();
                 super::open_chooser();
             });
             button.set_hexpand(true);
@@ -161,7 +143,7 @@ impl Deck {
         }
         if !all.is_empty() {
             let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            for rec in all.iter().take(SHOWN) {
+            for rec in &all {
                 list.append(&self.recording_row(s, rec));
             }
             column.append(&list);
@@ -181,21 +163,19 @@ impl Deck {
         row.append(&label);
         row.append(&TextStyle::new(9.5 * s, pango::Weight::Medium, FAINT).mono().label(&rec.size));
         let path = rec.path.clone();
-        let deck = Rc::downgrade(self);
+        let close = self.close.clone();
         row.append(&icon_button(s, "play_arrow", CREAM, "Play", {
-            let (path, deck) = (path.clone(), deck.clone());
+            let (path, close) = (path.clone(), close.clone());
             move || {
                 super::open(&path);
-                deck.upgrade().into_iter().for_each(|d| d.popout.hide());
+                close();
             }
         }));
-        row.append(&icon_button(s, "folder", theme::ICON_DIM, "Open the folder", {
-            let deck = deck.clone();
-            move || {
-                super::open(&recordings_dir());
-                deck.upgrade().into_iter().for_each(|d| d.popout.hide());
-            }
+        row.append(&icon_button(s, "folder", theme::ICON_DIM, "Open the folder", move || {
+            super::open(&recordings_dir());
+            close();
         }));
+        let deck = Rc::downgrade(self);
         row.append(&icon_button(s, "delete", RED, "Move to the trash", move || {
             super::trash(&path);
             if let Some(deck) = deck.upgrade() {
