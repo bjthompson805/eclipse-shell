@@ -249,11 +249,14 @@ fi
 
 # The shell alone: it runs with no arguments. Matching the name would also
 # end the hub, Walls, a recording's helpers and the very update running
-# this script (pkill spares only its own ancestors).
+# this script. -a: an update started from a hub the shell opened runs under
+# the shell, and pgrep and pkill skip their own ancestors by default; pkill
+# then matched nothing, failed, and set -e ended the update before the
+# restart. The hub and the update's terminal outlive the shell.
 shell_only='(^|/)eclipse-shell$'
-if pgrep -q -U "$user" -f "$shell_only"; then
+if pgrep -a -q -U "$user" -f "$shell_only"; then
 	say "restarting eclipse-shell"
-	pkill -U "$user" -f "$shell_only"
+	pkill -a -U "$user" -f "$shell_only"
 	sleep 0.5
 	daemon -f "$HOME/.local/bin/eclipse-shell"
 elif [ -n "${WAYLAND_DISPLAY:-}" ]; then
