@@ -403,8 +403,7 @@ impl Hub {
                 let running = updates::run(&text).is_some_and(|r| r.phase == "running");
                 if text != *hub.run_text.borrow() || running != shown_running.get() {
                     let was_running = shown_running.replace(running);
-                    // Finished: "done" shows for 3 s, then idle; a busy
-                    // machine can miss the first, so either counts.
+                    // Finished: "done", or idle from an older updater.
                     // If the new hub can't start, this one stays and shows
                     // the result.
                     if was_running && !running && updates::run(&text).is_none_or(|r| r.phase == "done") && hub.reopen() {

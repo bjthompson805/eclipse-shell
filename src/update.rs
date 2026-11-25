@@ -225,10 +225,9 @@ fn update() -> glib::ExitCode {
     p.set("install", "ok");
 
     p.say("done".to_owned());
+    // It stays, as a failure does: the hub that opens after the install
+    // shows how the last update ended, and the rollback, until the next one.
     p.publish("done", "Update complete", "");
-    // The page shows "complete" for a moment, then goes back to its status.
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    p.publish("idle", "", "");
     glib::ExitCode::SUCCESS
 }
 
