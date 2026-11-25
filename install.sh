@@ -34,7 +34,7 @@ if command -v doas >/dev/null 2>&1; then as_root=doas; else as_root=sudo; fi
 
 # ---- packages ----------------------------------------------------------------
 
-packages="gtk4 adwaita-icon-theme gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks jq"
+packages="gtk4 adwaita-icon-theme gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks"
 if [ $system -eq 1 ]; then
 	# Ask for the password once, up front, so a missing tty fails here.
 	if [ "$as_root" = sudo ] && ! sudo -v; then
@@ -84,8 +84,9 @@ fi
 
 say "building eclipse-shell"
 cargo install --quiet --path "$repo" --root "$HOME/.local"
-# Updates (the hub's Updates page): eclipse-update follows this checkout.
-install -m 755 "$repo/system/eclipse-update" "$HOME/.local/bin/eclipse-update"
+# Updates (`eclipse-shell update`, the hub's Updates page) follow this
+# checkout from the commit installed here.
+rm -f "$HOME/.local/bin/eclipse-update"
 mkdir -p "$HOME/.local/state/eclipse-shell"
 printf '%s\n' "$repo" >"$HOME/.local/state/eclipse-shell/repo"
 git -C "$repo" rev-parse HEAD >"$HOME/.local/state/eclipse-shell/installed" 2>/dev/null || :

@@ -43,6 +43,7 @@ mod traffic;
 mod traffic_popout;
 mod toasts;
 mod tray;
+mod update;
 mod usage_popout;
 mod wallpaper;
 mod wallpaper_switcher;
@@ -329,6 +330,10 @@ fn main() -> glib::ExitCode {
     // So is the hub, the settings app.
     if args.get(1).map(String::as_str) == Some("hub") {
         return hub::run(&args[2..]);
+    }
+    // Updates run here, in the caller's terminal, not in the running shell.
+    if args.get(1).map(String::as_str) == Some("update") {
+        return update::main(&args[2..]);
     }
     if args.get(1).map(String::as_str) == Some("livewall") {
         let Some(clip) = args.get(2) else {

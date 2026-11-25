@@ -7,7 +7,6 @@
 
 mod hypr;
 mod keybinds;
-mod updates;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -19,6 +18,7 @@ use gtk4 as gtk;
 
 use crate::config::{self, Settings};
 use crate::theme::{self, TextStyle, BRIGHT, CREAM, DIM, FAINT, SUBTLE};
+use crate::update as updates;
 use crate::walls::ui;
 use crate::{app_window, hyprland, mark, popout};
 use keybinds::Group;
@@ -427,7 +427,7 @@ impl Hub {
         }
         let (done, finished) = async_channel::bounded(1);
         std::thread::spawn(move || {
-            let _ = done.send_blocking(updates::check());
+            let _ = done.send_blocking(updates::status());
         });
         let hub = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -558,7 +558,7 @@ impl Hub {
             }
             self.content.append(&popout::card(&list));
             if !run.snapshot.is_empty() && !running {
-                let note = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).mono().label(&format!("To roll back: eclipse-update rollback {}, then reboot.", run.snapshot));
+                let note = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).mono().label(&format!("To roll back: eclipse-shell update rollback {}, then reboot.", run.snapshot));
                 note.set_xalign(0.0);
                 note.set_wrap(true);
                 note.set_margin_start(px(4.0));
@@ -1148,7 +1148,7 @@ impl Hub {
             return;
         }
         if self.query.borrow().is_empty() && self.page.get() == Page::Updates {
-            let text = updates::repo().map_or_else(|| "No checkout recorded yet; run install.sh from one.".to_owned(), |r| format!("Follows the checkout at {}", r.replace(&glib::home_dir().display().to_string(), "~")));
+            let text = updates::repo().map_or_else(|| "No checkout recorded yet; run install.sh from one.".to_owned(), |r| format!("Follows the checkout at {}", r.display().to_string().replace(&glib::home_dir().display().to_string(), "~")));
             let status = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label(&text);
             popout::fill(&status);
             self.footer.append(&status);
