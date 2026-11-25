@@ -247,17 +247,25 @@ fi
 
 # ---- restart a running shell -------------------------------------------------
 
-# The shell alone: it runs with no arguments. Matching the name would also
-# end the hub, Walls, a recording's helpers and the very update running
-# this script. -a: an update started from a hub the shell opened runs under
-# the shell, and pgrep and pkill skip their own ancestors by default; pkill
-# then matched nothing, failed, and set -e ended the update before the
-# restart. The hub and the update's terminal outlive the shell.
-shell_only='(^|/)eclipse-shell$'
+# The shell alone: its whole command line is the binary, no arguments.
+# Matching the name would also end the hub, Walls, a recording's helpers and
+# the update running this script, whose terminal runs
+# `sh -c '"$0" update ...' .../eclipse-shell`: a match on the line's end
+# killed that and with it this script, before the new shell started.
+# -a: an update started from a hub the shell opened runs under the shell,
+# and pgrep and pkill skip their own ancestors by default. The hub and the
+# update's terminal outlive the shell.
+shell_only='^([^ ]*/)?eclipse-shell$'
 if pgrep -a -q -U "$user" -f "$shell_only"; then
 	say "restarting eclipse-shell"
 	pkill -a -U "$user" -f "$shell_only"
-	sleep 0.5
+	# Until the old one has gone and let go of its D-Bus name, a new one
+	# would only hand it the command line. 5 s at most.
+	n=0
+	while pgrep -a -q -U "$user" -f "$shell_only" && [ $n -lt 50 ]; do
+		sleep 0.1
+		n=$((n + 1))
+	done
 	daemon -f "$HOME/.local/bin/eclipse-shell"
 elif [ -n "${WAYLAND_DISPLAY:-}" ]; then
 	daemon -f "$HOME/.local/bin/eclipse-shell"

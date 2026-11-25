@@ -392,13 +392,17 @@ impl Hub {
 
         // Follow an update run on the Updates page; check again once it ends.
         // A finished one installed a new hub, so this one hands over to it.
+        // A run whose process died never writes again: its text stays the
+        // same while it stops running, which is a change too.
         glib::timeout_add_local(Duration::from_secs(1), {
+            let shown_running = Cell::new(updates::run(&hub.run_text.borrow()).is_some_and(|r| r.phase == "running"));
             let hub = Rc::downgrade(&hub);
             move || {
                 let Some(hub) = hub.upgrade() else { return glib::ControlFlow::Break };
                 let text = updates::run_text();
-                if text != *hub.run_text.borrow() {
-                    let was_running = updates::run(&hub.run_text.borrow()).is_some_and(|r| r.phase == "running");
+                let running = updates::run(&text).is_some_and(|r| r.phase == "running");
+                if text != *hub.run_text.borrow() || running != shown_running.get() {
+                    let was_running = shown_running.replace(running);
                     if was_running && updates::run(&text).is_some_and(|r| r.phase == "done") {
                         hub.reopen();
                         return glib::ControlFlow::Break;
