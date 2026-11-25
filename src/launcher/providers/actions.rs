@@ -40,7 +40,6 @@ const CATALOG: &[Action] = &[
     Action { name: "Power Menu", keywords: "log out logout restart reboot shut down shutdown power off", glyph: "power_settings_new", tab: "Session", run: Run::Shell(&["toggle-power"]) },
     Action { name: "Next Wallpaper", keywords: "background shuffle", glyph: "shuffle", tab: "Look", run: Run::Shell(&["wallpaper-next"]) },
     Action { name: "Wallpaper Switcher", keywords: "background pick", glyph: "wallpaper", tab: "Look", run: Run::Shell(&["toggle-wallpapers"]) },
-    Action { name: "Walls", keywords: "wallpaper browser download wallhaven live", glyph: "imagesmode", tab: "Look", run: Run::Sh("eclipse-shell walls") },
     Action { name: "Night Light", keywords: "warm blue light hyprsunset", glyph: "nightlight", tab: "Look", run: Run::Sh("pkill -x hyprsunset || hyprsunset -t 4500") },
     Action { name: "Display", keywords: "brightness vibrance", glyph: "light_mode", tab: "Look", run: Run::Shell(&["toggle-display"]) },
     Action { name: "Screenshot Area", keywords: "capture grab snip region", glyph: "screenshot_region", tab: "Tools", run: Run::Sh("sleep 0.3; d=\"$HOME/Pictures/Screenshots\"; mkdir -p \"$d\"; f=\"$d/$(date +%Y-%m-%d_%H-%M-%S).png\"; g=\"$(slurp)\" && grim -g \"$g\" \"$f\" && wl-copy < \"$f\" && notify-send -i \"$f\" Screenshot \"Saved and copied\"") },

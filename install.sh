@@ -90,9 +90,17 @@ rm -f "$HOME/.local/bin/eclipse-update"
 mkdir -p "$HOME/.local/state/eclipse-shell"
 printf '%s\n' "$repo" >"$HOME/.local/state/eclipse-shell/repo"
 git -C "$repo" rev-parse HEAD >"$HOME/.local/state/eclipse-shell/installed" 2>/dev/null || :
-# The wallpaper browser, for the launcher.
-mkdir -p "$HOME/.local/share/applications"
-cp "$repo/data/io.github.bjthompson805.EclipseWalls.desktop" "$HOME/.local/share/applications/"
+# Eclipse's own apps (the hub, the wallpaper browser) for any launcher, named
+# "Eclipse ..." under the Eclipse mark. Full paths: ~/.local/bin need not be
+# on the launcher's PATH.
+apps="$HOME/.local/share/applications"
+icons="$HOME/.local/share/icons/hicolor/scalable/apps"
+mkdir -p "$apps" "$icons"
+cp "$repo/data/icons/eclipse-shell.svg" "$icons/eclipse-shell.svg"
+for app in EclipseHub EclipseWalls; do
+	sed "s|^Exec=eclipse-shell|Exec=$HOME/.local/bin/eclipse-shell|" \
+		"$repo/data/io.github.bjthompson805.$app.desktop" >"$apps/io.github.bjthompson805.$app.desktop"
+done
 
 # ---- root helper and boot script ---------------------------------------------
 

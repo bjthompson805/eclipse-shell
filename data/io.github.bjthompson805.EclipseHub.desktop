@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Eclipse Hub
+GenericName=Eclipse Shell Settings
+Comment=Part of Eclipse Shell: settings for the bar, launcher, windows, keybinds and updates
+Exec=eclipse-shell hub
+Icon=eclipse-shell
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=eclipse;settings;preferences;keybinds;shortcuts;updates;hyprland;
+StartupWMClass=io.github.bjthompson805.EclipseHub

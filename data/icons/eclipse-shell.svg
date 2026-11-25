@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The Eclipse Shell mark (src/mark.rs): a disc, and a smaller one on its
+       upper-right rim with a gap cut around it. -->
+  <defs>
+    <mask id="gap">
+      <rect width="128" height="128" fill="#fff"/>
+      <circle cx="92.52" cy="35.48" r="29.44" fill="#000"/>
+    </mask>
+  </defs>
+  <circle cx="56.32" cy="71.68" r="51.2" fill="#4fae72" mask="url(#gap)"/>
+  <circle cx="92.52" cy="35.48" r="20.48" fill="#9ee0b4"/>
+</svg>

@@ -88,7 +88,7 @@ impl Page {
             Self::Input => "Focus, pointer, touchpad and keyboard. Changes apply at once.",
             Self::Rules => "How an app's windows open: floating, centred, pinned, at a size or on a workspace. Rules apply to windows opened after the change.",
             Self::Startup => "What starts when you log in.",
-            Self::Keybinds => "Every shortcut in your Hyprland config, read from binds.lua and user.lua.",
+            Self::Keybinds => "Every shortcut in your Hyprland config, read from hyprland.lua, modules/binds.lua, eclipse_shell.lua and user.lua.",
             Self::Updates => "New commits to the checkout you installed from. An update pulls them and reinstalls the shell, after a boot environment to roll back to; it leaves system packages alone.",
         }
     }
@@ -1096,7 +1096,7 @@ impl Hub {
         let s = self.s;
         let px = |v: f64| (v * s).round() as i32;
         if self.binds.is_empty() {
-            self.content.append(&ui::note(s, "keyboard", "No binds found in ~/.config/hypr/modules/binds.lua or user.lua."));
+            self.content.append(&ui::note(s, "keyboard", "No binds found in ~/.config/hypr (hyprland.lua, modules/binds.lua, eclipse_shell.lua, user.lua)."));
             return 0;
         }
         let mut total = 0;

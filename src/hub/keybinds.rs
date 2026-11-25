@@ -1,5 +1,7 @@
 //! The keybind legend, read from the Hyprland Lua config: every `hl.bind`
-//! in `modules/binds.lua`, then `user.lua`. A comment after a blank line
+//! in `hyprland.lua` (a stock config keeps its binds there),
+//! `modules/binds.lua`, the `eclipse_shell.lua` install.sh writes, then
+//! `user.lua`. A comment after a blank line
 //! heads a group; a bind's trailing comment says what it does, and without
 //! one its command stands in.
 
@@ -20,7 +22,9 @@ pub struct Bind {
 
 pub fn load() -> Vec<Group> {
     let hypr = gtk4::glib::user_config_dir().join("hypr");
-    let mut groups = read(&hypr.join("modules").join("binds.lua"), "Keybinds");
+    let mut groups = read(&hypr.join("hyprland.lua"), "Hyprland");
+    groups.extend(read(&hypr.join("modules").join("binds.lua"), "Keybinds"));
+    groups.extend(read(&hypr.join("eclipse_shell.lua"), "Eclipse Shell"));
     groups.extend(read(&hypr.join("user.lua"), "Your own"));
     groups.retain(|g| !g.binds.is_empty());
     groups
@@ -48,14 +52,18 @@ fn parse(text: &str, first: &str) -> Vec<Group> {
             }
             continue;
         }
-        if let Some(rest) = line.strip_prefix("local ") {
-            if let Some((name, value)) = rest.split_once('=')
-                && let Some(value) = string_literal(value.trim())
-            {
-                locals.push((name.trim().to_owned(), value));
+        // A bind kept in a local, as the stock config's
+        // `local closeWindowBind = hl.bind(...)`, is still a bind.
+        let line = match line.strip_prefix("local ").and_then(|rest| rest.split_once('=')) {
+            Some((_, value)) if value.trim_start().starts_with("hl.bind(") => value.trim_start(),
+            Some((name, value)) => {
+                if let Some(value) = string_literal(value.trim()) {
+                    locals.push((name.trim().to_owned(), value));
+                }
+                continue;
             }
-            continue;
-        }
+            None => line,
+        };
         let Some(args) = line.strip_prefix("hl.bind(") else { continue };
         let (code, comment) = split_comment(args);
         let Some((key, action)) = split_top(code) else { continue };
@@ -65,16 +73,18 @@ fn parse(text: &str, first: &str) -> Vec<Group> {
         }
         let (what, raw) = match comment {
             Some(c) => (sentence(c), false),
-            None => (command(action), true),
+            None => (command(action, &locals), true),
         };
         groups.last_mut().unwrap().binds.push(Bind { keys, what, raw });
     }
     groups
 }
 
-/// A group title from its comment: the first sentence, without the stop.
+/// A group title from its comment: the first sentence, without the stop or
+/// a trailing pointer like the stock config's ", see https://...".
 fn heading(comment: &str) -> String {
     let first = comment.split(". ").next().unwrap_or(comment);
+    let first = first.split(", see ").next().unwrap_or(first);
     first.trim_end_matches('.').to_owned()
 }
 
@@ -84,11 +94,30 @@ fn sentence(comment: &str) -> String {
 }
 
 /// What a bind without a comment runs: the command of an `exec_cmd`, or the dispatcher.
-fn command(action: &str) -> String {
-    if let Some(at) = action.find("exec_cmd(")
-        && let Some(cmd) = string_literal(&action[at + "exec_cmd(".len()..])
-    {
-        return cmd;
+fn command(action: &str, locals: &[(String, String)]) -> String {
+    if let Some(at) = action.find("exec_cmd(") {
+        // The argument up to its closing paren: literals and locals joined
+        // by `..`, as in `shell .. " hub"`.
+        let arg = call_arg(&action[at + "exec_cmd(".len()..]);
+        let mut cmd = String::new();
+        for part in arg.split("..").map(str::trim) {
+            match string_literal(part).or_else(|| locals.iter().rev().find(|(n, _)| n == part).map(|(_, v)| v.clone())) {
+                Some(s) => cmd.push_str(&s),
+                None => {
+                    cmd.clear();
+                    break;
+                }
+            }
+        }
+        // A program by full path reads better by name.
+        if cmd.starts_with('/') {
+            let (program, rest) = cmd.split_once(' ').unwrap_or((&cmd, ""));
+            let name = program.rsplit('/').next().unwrap_or(program);
+            cmd = format!("{name} {rest}").trim_end().to_owned();
+        }
+        if !cmd.is_empty() {
+            return cmd;
+        }
     }
     let action = action.trim().trim_start_matches("hl.dsp.");
     action.split('(').next().unwrap_or(action).replace(['.', '_'], " ")
@@ -110,6 +139,25 @@ fn split_comment(line: &str) -> (&str, Option<&str>) {
         i += 1;
     }
     (line, None)
+}
+
+/// A call's argument text, `text` starting just inside its paren: up to the
+/// paren that closes it, skipping any inside strings.
+fn call_arg(text: &str) -> &str {
+    let mut depth = 0i32;
+    let mut quote = None;
+    for (i, c) in text.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(' | '{' | '[') => depth += 1,
+            (None, ')') if depth == 0 => return &text[..i],
+            (None, ')' | '}' | ']') => depth -= 1,
+            _ => {}
+        }
+    }
+    text
 }
 
 /// Splits `hl.bind`'s arguments at the first top-level comma: the key, then the rest.
@@ -212,6 +260,31 @@ end
 hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle; eclipse-shell osd volume"), { locked = true })
 -- hl.bind("SUPER + SHIFT + T", hl.dsp.exec_cmd("kitty"))
 "#;
+
+    /// The stock hyprland.lua and the eclipse_shell.lua install.sh writes.
+    const STOCK: &str = r#"local terminal = "kitty"
+local mainMod = "SUPER"
+local shell = "/home/me/.local/bin/eclipse-shell"
+
+-- Example binds, see https://wiki.hypr.land/Configuring/Basics/Binds/ for more
+hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal))
+local closeWindowBind = hl.bind(mainMod .. " + C", hl.dsp.window.close())
+-- closeWindowBind:set_enabled(false)
+hl.bind("SUPER + ALT + W",    hl.dsp.exec_cmd(shell .. " wallpaper-next"))
+hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"), { locked = true, repeating = true })
+"#;
+
+    #[test]
+    fn stock_config() {
+        let groups = parse(STOCK, "Hyprland");
+        let binds: Vec<&Bind> = groups.iter().flat_map(|g| &g.binds).collect();
+        assert_eq!(groups.last().unwrap().title, "Example binds");
+        assert_eq!(binds.len(), 4);
+        assert_eq!((binds[0].keys.join("+"), binds[0].what.as_str()), ("Super+Q".to_owned(), "kitty"));
+        assert_eq!((binds[1].keys.join("+"), binds[1].what.as_str()), ("Super+C".to_owned(), "window close"));
+        assert_eq!((binds[2].keys.join("+"), binds[2].what.as_str()), ("Super+Alt+W".to_owned(), "eclipse-shell wallpaper-next"));
+        assert_eq!(binds[3].what, "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle");
+    }
 
     #[test]
     fn groups_and_binds() {
