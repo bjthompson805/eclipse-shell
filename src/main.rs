@@ -37,6 +37,7 @@ mod overview;
 mod popout;
 mod power;
 mod resources_popout;
+mod shot;
 mod sysstats;
 mod theme;
 mod traffic;
@@ -469,6 +470,11 @@ fn main() -> glib::ExitCode {
                 if let Some(surfaces) = surfaces.get() {
                     surfaces.overview.toggle();
                 }
+            }
+            // `screenshot monitor` picks a whole monitor instead of a region.
+            Some("screenshot") => {
+                let has = |word: &str| args.iter().skip(2).any(|a| a.to_str() == Some(word));
+                shot::start(app, has("monitor"), has("--test"));
             }
             Some("toggle-inbox") => {
                 if let Some(surfaces) = surfaces.get() {
