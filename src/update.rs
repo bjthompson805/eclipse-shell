@@ -102,18 +102,30 @@ pub fn run_text() -> String {
 pub fn run(text: &str) -> Option<Run> {
     let v: Value = serde_json::from_str(text).ok()?;
     let text = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_owned();
-    let phase = text(&v, "phase");
+    let mut phase = text(&v, "phase");
     if phase.is_empty() || phase == "idle" {
         return None;
     }
+    let mut error = text(&v, "error");
+    // A run whose process is gone never finishes: say so, rather than show
+    // it running forever.
+    let pid = v["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
+    // SAFETY: signal 0 only asks whether the process exists.
+    if phase == "running" && pid.is_some_and(|p| unsafe { libc::kill(p, 0) } != 0) {
+        phase = "error".to_owned();
+        error = "The update stopped before it finished.".to_owned();
+    }
     let steps = v["steps"].as_array().into_iter().flatten().map(|s| Step { name: text(s, "name"), state: text(s, "state") }).collect();
     let log = v["log"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_owned)).collect();
-    Some(Run { phase, label: text(&v, "label"), error: text(&v, "error"), snapshot: text(&v, "snapshot"), steps, log })
+    Some(Run { phase, label: text(&v, "label"), error, snapshot: text(&v, "snapshot"), steps, log })
 }
 
-/// Terminals to run an update in, first found wins, each with the flags
-/// that keep it open after the command ends.
-const TERMINALS: &[(&str, &[&str])] = &[("foot", &["--title", "Eclipse update", "--hold", "--"]), ("kitty", &["--title", "Eclipse update", "--hold", "--"]), ("alacritty", &["--title", "Eclipse update", "--hold", "-e"]), ("xterm", &["-T", "Eclipse update", "-hold", "-e"])];
+/// Terminals to run an update in, first found wins, each with the flag
+/// that runs a command.
+const TERMINALS: &[(&str, &[&str])] = &[("foot", &["--title", "Eclipse update", "--"]), ("kitty", &["--title", "Eclipse update", "--"]), ("alacritty", &["--title", "Eclipse update", "-e"]), ("xterm", &["-T", "Eclipse update", "-e"])];
+
+/// Runs the update, then waits for a key so its output can be read.
+const WRAPPER: &str = "\"$0\" update; printf '\\nPress any key to close.'; stty -icanon -echo min 1 2>/dev/null; dd bs=1 count=1 >/dev/null 2>&1";
 
 /// Starts an update in a terminal, where sudo can ask for a password.
 pub fn start() -> std::io::Result<()> {
@@ -122,7 +134,7 @@ pub fn start() -> std::io::Result<()> {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no terminal found (foot, kitty, alacritty or xterm)"));
     };
     let exe = std::env::current_exe()?;
-    Command::new(terminal).args(*flags).arg(exe).arg("update").process_group(0).stdin(std::process::Stdio::null()).spawn().map(|_| ())
+    Command::new(terminal).args(*flags).args(["sh", "-c", WRAPPER]).arg(exe).process_group(0).stdin(std::process::Stdio::null()).spawn().map(|_| ())
 }
 
 fn as_root() -> &'static str {
@@ -146,7 +158,7 @@ impl Progress {
     fn publish(&self, phase: &str, label: &str, error: &str) {
         let steps: Vec<Value> = self.steps.iter().map(|(name, state)| json!({ "name": name, "state": state })).collect();
         let log = &self.log[self.log.len().saturating_sub(6)..];
-        let body = json!({ "phase": phase, "label": label, "error": error, "snapshot": self.snapshot, "steps": steps, "log": log });
+        let body = json!({ "phase": phase, "label": label, "error": error, "snapshot": self.snapshot, "steps": steps, "log": log, "pid": std::process::id() });
         let file = run_file();
         let tmp = file.with_extension("json.tmp");
         if std::fs::write(&tmp, body.to_string()).is_ok() {
@@ -255,5 +267,22 @@ pub fn main(args: &[String]) -> glib::ExitCode {
             eprintln!("usage: eclipse-shell update [status [--json] | rollback <boot-environment>]");
             glib::ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runs() {
+        let file = |phase: &str, pid: u32| json!({ "phase": phase, "label": "Installing", "error": "", "snapshot": "", "steps": [], "log": [], "pid": pid }).to_string();
+        // Running, and its process alive (this test's own).
+        assert_eq!(run(&file("running", std::process::id())).map(|r| r.phase).as_deref(), Some("running"));
+        // Running, but its process is gone: it stopped.
+        let gone = run(&file("running", 999_999)).unwrap();
+        assert_eq!((gone.phase.as_str(), gone.error.as_str()), ("error", "The update stopped before it finished."));
+        assert!(run(&file("idle", 1)).is_none());
+        assert_eq!(run(&file("done", 999_999)).map(|r| r.phase).as_deref(), Some("done"));
     }
 }

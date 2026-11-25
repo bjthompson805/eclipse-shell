@@ -247,9 +247,13 @@ fi
 
 # ---- restart a running shell -------------------------------------------------
 
-if pgrep -qx -U "$user" eclipse-shell; then
+# The shell alone: it runs with no arguments. Matching the name would also
+# end the hub, Walls, a recording's helpers and the very update running
+# this script (pkill spares only its own ancestors).
+shell_only='(^|/)eclipse-shell$'
+if pgrep -q -U "$user" -f "$shell_only"; then
 	say "restarting eclipse-shell"
-	pkill -x -U "$user" eclipse-shell
+	pkill -U "$user" -f "$shell_only"
 	sleep 0.5
 	daemon -f "$HOME/.local/bin/eclipse-shell"
 elif [ -n "${WAYLAND_DISPLAY:-}" ]; then

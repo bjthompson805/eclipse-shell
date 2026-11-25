@@ -423,13 +423,16 @@ impl Hub {
     }
 
     /// Closes this hub and opens the installed one on the Updates page. The
-    /// new one waits until this one has let go of its D-Bus name, else it
-    /// would only hand this one the command line.
+    /// new one waits until this process has exited and let go of its D-Bus
+    /// name, else it would only hand this one the command line.
     fn reopen(&self) {
         use std::os::unix::process::CommandExt;
         let Ok(exe) = std::env::current_exe() else { return };
-        let _ = std::process::Command::new("sh").args(["-c", "sleep 1; exec \"$0\" hub updates"]).arg(exe).process_group(0).stdin(std::process::Stdio::null()).spawn();
-        self.window.close();
+        let script = "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; exec \"$0\" hub updates";
+        let _ = std::process::Command::new("sh").args(["-c", script]).arg(exe).arg(std::process::id().to_string()).process_group(0).stdin(std::process::Stdio::null()).spawn();
+        if let Some(app) = self.window.application() {
+            app.quit();
+        }
     }
 
     /// Runs the update check in the background, then redraws the page.
