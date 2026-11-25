@@ -3,8 +3,8 @@
 //! FloatingIsland and RecordHud). Before a recording it's the chooser:
 //! region or whole monitor, desktop audio, mic, then Record or close. While
 //! recording: a pulsing dot, the elapsed time, stop, speaker and mic mutes,
-//! and hide, which tucks it back into the frame as a small nub that hovering
-//! brings out again.
+//! and tuck, which melts it back into the frame as a small nub. Hovering the
+//! nub brings it out for a moment; its untuck button keeps it out.
 //!
 //! Docked, it's fused to a frame edge: the frame swells out to hold it, with
 //! concave fillets where they meet. The six-dot grip pulls it free; as it
@@ -227,7 +227,7 @@ impl Hud {
         };
         if want {
             let key = if recording {
-                format!("rec {} {} {:?}", self.sink_muted.get(), self.mic_muted.get(), self.side.get().horizontal())
+                format!("rec {} {} {} {:?}", self.sink_muted.get(), self.mic_muted.get(), self.hidden.get(), self.side.get().horizontal())
             } else {
                 let (desktop, mic) = super::audio_choices();
                 format!("choose {} {desktop} {mic} {:?}", region().is_some(), self.side.get().horizontal())
@@ -533,9 +533,12 @@ impl Hud {
                 let hud = hud.clone();
                 move || hud.upgrade().into_iter().for_each(|h| h.toggle_mute("@DEFAULT_AUDIO_SOURCE@"))
             }));
-            row.append(&icon_button(s, "compress", SUBTLE, "Tuck into the frame", move || {
+            // Tuck into the frame, or, hovered out of it, stay out.
+            let tucked = self.hidden.get();
+            let (glyph, hint) = if tucked { ("expand", "Keep out of the frame") } else { ("compress", "Tuck into the frame") };
+            row.append(&icon_button(s, glyph, SUBTLE, hint, move || {
                 if let Some(hud) = hud.upgrade() {
-                    hud.hidden.set(true);
+                    hud.hidden.set(!tucked);
                     hud.revealed.set(false);
                     hud.update();
                 }
