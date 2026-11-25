@@ -38,6 +38,8 @@ const CATALOG: &[Action] = &[
     Action { name: "Lock Screen", keywords: "lock away", glyph: "lock", tab: "Session", run: Run::Sh(crate::power::LOCK) },
     Action { name: "Sleep", keywords: "suspend", glyph: "bedtime", tab: "Session", run: Run::Sh("acpiconf -s 3") },
     Action { name: "Power Menu", keywords: "log out logout restart reboot shut down shutdown power off", glyph: "power_settings_new", tab: "Session", run: Run::Shell(&["toggle-power"]) },
+    Action { name: "Screen Recorder", keywords: "record recordings video capture screencast", glyph: "radio_button_checked", tab: "Tools", run: Run::Shell(&["toggle-recorder"]) },
+    Action { name: "Record Screen", keywords: "record video capture screencast start", glyph: "fiber_manual_record", tab: "Tools", run: Run::Shell(&["record-chooser"]) },
     Action { name: "Next Wallpaper", keywords: "background shuffle", glyph: "shuffle", tab: "Look", run: Run::Shell(&["wallpaper-next"]) },
     Action { name: "Wallpaper Switcher", keywords: "background pick", glyph: "wallpaper", tab: "Look", run: Run::Shell(&["toggle-wallpapers"]) },
     Action { name: "Night Light", keywords: "warm blue light hyprsunset", glyph: "nightlight", tab: "Look", run: Run::Sh("pkill -x hyprsunset || hyprsunset -t 4500") },

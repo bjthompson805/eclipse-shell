@@ -169,6 +169,7 @@ fn rows() -> Vec<Row> {
         row(Bar, "Status glyphs", "Volume, brightness, network, Bluetooth and battery.", switch!(bar_status)),
         row(Bar, "Weather", "The current conditions, from the weather location.", switch!(bar_weather)),
         row(Bar, "Tray", "System tray icons.", switch!(bar_tray)),
+        row(Bar, "Screen recorder", "Record the screen, and the time while recording.", switch!(bar_recorder)),
         row(Bar, "Media", "The playing track.", switch!(bar_media)),
         row(Bar, "Occupied workspaces only", "Hide workspaces past the highest occupied one.", switch!(occupied_workspaces_only)),
         row(Bar, "Workspace icons", "App icons inside occupied workspace pills.", switch!(workspace_icons)),

@@ -34,7 +34,7 @@ if command -v doas >/dev/null 2>&1; then as_root=doas; else as_root=sudo; fi
 
 # ---- packages ----------------------------------------------------------------
 
-packages="gtk4 adwaita-icon-theme gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks"
+packages="gtk4 adwaita-icon-theme gtk4-layer-shell rust curl wallust papirus-icon-theme nerd-fonts-jetbrainsmono pipewire pipewire-spa-oss-ng wireplumber webp-pixbuf-loader awww hyprsunset mpv mpv-mpris yt-dlp dbus consolekit2 polkit bsdisks wf-recorder slurp"
 if [ $system -eq 1 ]; then
 	# Ask for the password once, up front, so a missing tty fails here.
 	if [ "$as_root" = sudo ] && ! sudo -v; then
@@ -90,14 +90,14 @@ rm -f "$HOME/.local/bin/eclipse-update"
 mkdir -p "$HOME/.local/state/eclipse-shell"
 printf '%s\n' "$repo" >"$HOME/.local/state/eclipse-shell/repo"
 git -C "$repo" rev-parse HEAD >"$HOME/.local/state/eclipse-shell/installed" 2>/dev/null || :
-# Eclipse's own apps (the hub, the wallpaper browser) for any launcher, named
+# Eclipse's own apps (the hub, the wallpaper browser, the recorder) for any launcher, named
 # "Eclipse ..." under the Eclipse mark. Full paths: ~/.local/bin need not be
 # on the launcher's PATH.
 apps="$HOME/.local/share/applications"
 icons="$HOME/.local/share/icons/hicolor/scalable/apps"
 mkdir -p "$apps" "$icons"
 cp "$repo/data/icons/eclipse-shell.svg" "$icons/eclipse-shell.svg"
-for app in EclipseHub EclipseWalls; do
+for app in EclipseHub EclipseWalls EclipseRecorder; do
 	sed "s|^Exec=eclipse-shell|Exec=$HOME/.local/bin/eclipse-shell|" \
 		"$repo/data/io.github.bjthompson805.$app.desktop" >"$apps/io.github.bjthompson805.$app.desktop"
 done

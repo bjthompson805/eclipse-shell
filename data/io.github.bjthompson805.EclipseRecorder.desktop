@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Eclipse Recorder
+GenericName=Screen Recorder
+Comment=Part of Eclipse Shell: record the screen, and the settings and recordings behind it
+Exec=eclipse-shell recorder
+Icon=eclipse-shell
+Terminal=false
+Categories=AudioVideo;Video;Recorder;
+Keywords=eclipse;record;recorder;screencast;video;capture;wf-recorder;
+StartupWMClass=io.github.bjthompson805.EclipseRecorder
