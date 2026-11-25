@@ -1,10 +1,10 @@
 //! The right sidebar: quick controls over a tabbed glance. A clock and the
 //! weather, quick toggles (Wi-Fi, Bluetooth, do not disturb, night light,
 //! always on, microphone, airplane mode) in a box, a row at a time with the
-//! rest behind a chevron, the apps (Hub, Screenshot) flat beneath them,
-//! volume and brightness faders, then a tab rail
-//! over notifications, the calendar, now playing, the forecast and the
-//! screen recorder with its recordings.
+//! rest behind a chevron, the apps (Hub, Screenshot, Recorder, Walls) flat
+//! beneath them, volume and brightness faders, then a tab rail over
+//! notifications, the calendar, now playing, the forecast and the screen
+//! recorder with its recordings.
 //!
 //! The tab panes are the popouts' own cards, each popout built a second time
 //! on a [`Popout::pane`] here, so they stay identical and keep their own live
@@ -42,7 +42,12 @@ const HELPER: &str = "/usr/local/libexec/eclipse-priv";
 /// Toggles in a row; more wrap behind the chevron.
 const PER_ROW: usize = 5;
 /// The apps row: glyph, name, and the eclipse-shell command that opens it.
-const APPS: &[(&str, &str, &[&str])] = &[("settings", "Hub", &["hub"]), ("screenshot_region", "Screenshot", &["screenshot"])];
+const APPS: &[(&str, &str, &[&str])] = &[
+    ("settings", "Hub", &["hub"]),
+    ("screenshot_region", "Screenshot", &["screenshot"]),
+    ("videocam", "Recorder", &["recorder"]),
+    ("wallpaper", "Walls", &["walls"]),
+];
 const NIGHT_TEMPERATURE: &str = "4500";
 /// Hyprland starts hypridle alongside the shell, so a remembered Always on
 /// keeps stopping it for this long after startup.
