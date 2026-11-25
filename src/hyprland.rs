@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gtk4::glib;
 use serde::Deserialize;
@@ -388,7 +388,10 @@ pub fn watch() -> async_channel::Receiver<State> {
         let timeout_handle = stream.try_clone();
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
-        let mut pending = false;
+        // When a refresh is due: SETTLE after the first event that wants one,
+        // however busy the stream. A recording sends a screencast event per
+        // frame, so waiting for a quiet SETTLE never ended while it ran.
+        let mut due: Option<Instant> = None;
         loop {
             match reader.read_line(&mut line) {
                 Ok(0) => break,
@@ -400,28 +403,30 @@ pub fn watch() -> async_channel::Receiver<State> {
                             let _ = tx.try_send(());
                         }
                     }
-                    if REFRESH_EVENTS.iter().any(|e| name.starts_with(e)) && !pending {
-                        pending = true;
-                        if let Ok(s) = &timeout_handle {
-                            let _ = s.set_read_timeout(Some(SETTLE));
-                        }
+                    if REFRESH_EVENTS.iter().any(|e| name.starts_with(e)) && due.is_none() {
+                        due = Some(Instant::now() + SETTLE);
                     }
                     line.clear();
                 }
-                // The settle window passed with no more events. Any partial
-                // line stays in `line` and is completed by the next read.
-                Err(err) if matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
-                    pending = false;
-                    if let Ok(s) = &timeout_handle {
-                        let _ = s.set_read_timeout(None);
-                    }
+                // The read timed out: the refresh is due. Any partial line
+                // stays in `line` and is completed by the next read.
+                Err(err) if matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {}
+                Err(err) => {
+                    eprintln!("eclipse-shell: Hyprland event stream closed: {err}");
+                    break;
+                }
+            }
+            if let Some(at) = due {
+                let left = at.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    due = None;
                     if !publish() {
                         break;
                     }
                 }
-                Err(err) => {
-                    eprintln!("eclipse-shell: Hyprland event stream closed: {err}");
-                    break;
+                // Wake for what's left, or block again once published.
+                if let Ok(s) = &timeout_handle {
+                    let _ = s.set_read_timeout(due.map(|_| left.max(Duration::from_millis(1))));
                 }
             }
         }
