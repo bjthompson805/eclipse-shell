@@ -93,6 +93,8 @@ pub struct Hud {
     /// The input region now (x, y, w, h), and whether the pointer is in it.
     input: Cell<(f64, f64, f64, f64)>,
     pointer_in: Cell<bool>,
+    /// False from a tuck until the pointer has left the nub's strip.
+    armed: Cell<bool>,
     sink_muted: Cell<bool>,
     mic_muted: Cell<bool>,
     /// What the body last showed, so a tick of the clock doesn't rebuild it.
@@ -143,6 +145,7 @@ impl Hud {
             reveal_leave: Cell::new(0),
             input: Cell::new((0.0, 0.0, 0.0, 0.0)),
             pointer_in: Cell::new(false),
+            armed: Cell::new(true),
             sink_muted: Cell::new(false),
             mic_muted: Cell::new(false),
             key: RefCell::default(),
@@ -206,6 +209,15 @@ impl Hud {
     fn track(self: &Rc<Self>, at: Option<(f64, f64)>) {
         let (rx, ry, rw, rh) = self.input.get();
         let inside = at.is_some_and(|(x, y)| x >= rx && x < rx + rw && y >= ry && y < ry + rh);
+        // Just tucked, the pointer is still over the nub's strip: it has to
+        // leave once before coming back reveals, or the tuck undoes itself.
+        if !inside {
+            self.armed.set(true);
+        }
+        if !self.armed.get() {
+            self.pointer_in.set(inside);
+            return;
+        }
         if self.pointer_in.replace(inside) != inside {
             self.hover(inside);
         }
@@ -563,8 +575,10 @@ impl Hud {
                     hud.hidden.set(!tucked);
                     hud.revealed.set(false);
                     // The nub shrinks out from under the pointer: it's out,
-                    // so coming back onto the nub reveals it.
+                    // and once it has left the nub's strip, coming back
+                    // reveals it.
                     hud.pointer_in.set(false);
+                    hud.armed.set(false);
                     hud.update();
                 }
             }));
