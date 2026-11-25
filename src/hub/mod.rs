@@ -403,7 +403,9 @@ impl Hub {
                 let running = updates::run(&text).is_some_and(|r| r.phase == "running");
                 if text != *hub.run_text.borrow() || running != shown_running.get() {
                     let was_running = shown_running.replace(running);
-                    if was_running && updates::run(&text).is_some_and(|r| r.phase == "done") {
+                    // Finished: "done" shows for 3 s, then idle; a busy
+                    // machine can miss the first, so either counts.
+                    if was_running && !running && updates::run(&text).is_none_or(|r| r.phase == "done") {
                         hub.reopen();
                         return glib::ControlFlow::Break;
                     }

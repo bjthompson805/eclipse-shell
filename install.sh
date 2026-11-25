@@ -247,22 +247,24 @@ fi
 
 # ---- restart a running shell -------------------------------------------------
 
-# The shell alone: its whole command line is the binary, no arguments.
-# Matching the name would also end the hub, Walls, a recording's helpers and
-# the update running this script, whose terminal runs
-# `sh -c '"$0" update ...' .../eclipse-shell`: a match on the line's end
-# killed that and with it this script, before the new shell started.
-# -a: an update started from a hub the shell opened runs under the shell,
-# and pgrep and pkill skip their own ancestors by default. The hub and the
-# update's terminal outlive the shell.
-shell_only='^([^ ]*/)?eclipse-shell$'
-if pgrep -a -q -U "$user" -f "$shell_only"; then
+# The running shell is whoever holds its D-Bus name: the first command run
+# becomes it, so its command line can be `eclipse-shell toggle-launcher`
+# as well as the bare binary, and matching processes missed it or killed
+# the wrong ones. `eclipse-shell quit` asks it to go, whatever started it;
+# the hub, Walls and this update are apps of their own and stay.
+app_id=io.github.bjthompson805.EclipseShell
+shell_running() {
+	dbus-send --session --print-reply --dest=org.freedesktop.DBus \
+	    /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner \
+	    "string:$app_id" 2>/dev/null | grep -q 'boolean true'
+}
+if shell_running; then
 	say "restarting eclipse-shell"
-	pkill -a -U "$user" -f "$shell_only"
-	# Until the old one has gone and let go of its D-Bus name, a new one
-	# would only hand it the command line. 5 s at most.
+	"$bin" quit || :
+	# Until the old one has let go of its name, a new one would only hand
+	# it the command line. 5 s at most.
 	n=0
-	while pgrep -a -q -U "$user" -f "$shell_only" && [ $n -lt 50 ]; do
+	while shell_running && [ $n -lt 50 ]; do
 		sleep 0.1
 		n=$((n + 1))
 	done
