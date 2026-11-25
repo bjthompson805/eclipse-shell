@@ -486,22 +486,29 @@ impl Hub {
         }
         head.append(&words);
         let hub = Rc::downgrade(self);
-        head.append(&ui::button(s, Some("refresh"), "Check now", false, !self.checking.get() && !running, move || {
+        let check = ui::button(s, Some("refresh"), "Check now", false, !self.checking.get() && !running, move || {
             if let Some(hub) = hub.upgrade() {
                 hub.check_updates();
             }
-        }));
+        });
+        check.set_valign(gtk::Align::Center);
+        head.append(&check);
         let pending = matches!(&status, Some(Ok(st)) if !st.commits.is_empty());
         let hub = Rc::downgrade(self);
-        head.append(&ui::button(s, Some("download"), "Update", true, pending && !running, move || {
+        let update = ui::button(s, Some("download"), "Update", true, pending && !running, move || {
             if let Some(hub) = hub.upgrade() {
                 match updates::start() {
                     Ok(()) => hub.flash("Updating in a terminal; it asks for your password there."),
                     Err(e) => hub.flash(&format!("Couldn't open a terminal: {e}")),
                 }
             }
-        }));
-        self.content.append(&popout::card(&head));
+        });
+        update.set_valign(gtk::Align::Center);
+        head.append(&update);
+        // In a box, so the card measures the line's margins.
+        let wrap = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        wrap.append(&head);
+        self.content.append(&popout::card(&wrap));
 
         // A run in progress, or how the last one ended.
         if let Some(run) = &run {
