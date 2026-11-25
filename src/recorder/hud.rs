@@ -545,7 +545,7 @@ impl Hud {
 
         let picked = region().is_some();
         let (desktop, mic) = super::audio_choices();
-        row.append(&icon_button(s, if picked { "crop_free" } else { "desktop_windows" }, if picked { CREAM } else { SUBTLE }, if picked { "Region (click for the whole monitor)" } else { "Whole monitor (click to pick a region)" }, super::toggle_region));
+        row.append(&icon_button(s, if picked { "crop_free" } else { "desktop_windows" }, if picked { CREAM } else { SUBTLE }, if picked { "Switch to full-monitor recording" } else { "Switch to region recording" }, super::toggle_region));
         row.append(&icon_button(s, if desktop { "volume_up" } else { "volume_off" }, if desktop { CREAM } else { SUBTLE }, "Record desktop audio", super::toggle_desktop_audio));
         row.append(&icon_button(s, if mic { "mic" } else { "mic_off" }, if mic { CREAM } else { SUBTLE }, "Record the microphone", super::toggle_mic));
         let divider = gtk::DrawingArea::builder()

@@ -81,16 +81,59 @@ fn focused_output() -> Option<String> {
     monitors.iter().find(|m| m["focused"].as_bool() == Some(true)).and_then(name).or_else(|| monitors.first().and_then(name))
 }
 
-/// The region as wf-recorder's "X,Y WxH": the box given, else slurp's.
+/// The region as wf-recorder's "X,Y WxH": the box given, else slurp's,
+/// trimmed to an even size in device pixels (see [`even`]).
 fn region(geometry: Option<&str>) -> Option<String> {
-    if let Some(g) = geometry.filter(|g| valid_geometry(g)) {
-        let (size, pos) = g.split_once('+')?;
-        let (x, y) = pos.split_once('+')?;
-        return Some(format!("{x},{y} {size}"));
-    }
-    let out = Command::new("slurp").stderr(Stdio::null()).output().ok()?;
-    let g = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    (out.status.success() && !g.is_empty()).then_some(g)
+    let g = match geometry.filter(|g| valid_geometry(g)) {
+        Some(g) => {
+            let (size, pos) = g.split_once('+')?;
+            let (x, y) = pos.split_once('+')?;
+            format!("{x},{y} {size}")
+        }
+        None => {
+            let out = Command::new("slurp").stderr(Stdio::null()).output().ok()?;
+            let g = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            (out.status.success() && !g.is_empty()).then_some(g)?
+        }
+    };
+    Some(evened(&g, monitor_scale).unwrap_or(g))
+}
+
+/// The scale of the monitor holding logical point (x, y).
+fn monitor_scale(x: f64, y: f64) -> f64 {
+    let Some(out) = Command::new("hyprctl").args(["monitors", "-j"]).stderr(Stdio::null()).output().ok() else { return 1.0 };
+    let monitors: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    monitors
+        .iter()
+        .find(|m| {
+            let (mx, my, s) = (m["x"].as_f64().unwrap_or(0.0), m["y"].as_f64().unwrap_or(0.0), m["scale"].as_f64().unwrap_or(1.0));
+            let (mw, mh) = (m["width"].as_f64().unwrap_or(0.0) / s, m["height"].as_f64().unwrap_or(0.0) / s);
+            x >= mx && x < mx + mw && y >= my && y < my + mh
+        })
+        .and_then(|m| m["scale"].as_f64())
+        .unwrap_or(1.0)
+}
+
+/// "X,Y WxH" with W and H shrunk, by a few px at most, so the recording's
+/// size in device pixels is even. H.264's 4:2:0 frames want even sizes; an
+/// odd one (914 x 1.5 = 1371) made a recording that hung the GPU in mpv.
+fn evened(g: &str, scale_at: impl Fn(f64, f64) -> f64) -> Option<String> {
+    let (pos, size) = g.split_once(' ')?;
+    let (x, y) = pos.split_once(',')?;
+    let (w, h) = size.split_once('x')?;
+    let (x, y, w, h): (f64, f64, f64, f64) = (x.parse().ok()?, y.parse().ok()?, w.parse().ok()?, h.parse().ok()?);
+    let s = scale_at(x, y);
+    Some(format!("{x},{y} {}x{}", even(w, s), even(h, s)))
+}
+
+/// The largest length at most `len` (and at most 7 less) whose size at
+/// `scale` is a whole, even number of pixels.
+fn even(len: f64, scale: f64) -> f64 {
+    let fits = |l: f64| {
+        let px = l * scale;
+        l >= 2.0 && (px - px.round()).abs() < 1e-6 && (px.round() as i64) % 2 == 0
+    };
+    (0..8).map(|d| len - f64::from(d)).find(|l| fits(*l)).unwrap_or(len)
 }
 
 fn next_path() -> PathBuf {
@@ -255,7 +298,11 @@ mod tests {
 
     #[test]
     fn regions_and_presets() {
-        assert_eq!(region(Some("800x600+10+20")).as_deref(), Some("10,20 800x600"));
+        // The region that hung the GPU: 914x439 at 1.5 was 1371x658.5.
+        assert_eq!(evened("171,323 914x439", |_, _| 1.5).as_deref(), Some("171,323 912x436"));
+        assert_eq!(evened("10,20 800x600", |_, _| 1.0).as_deref(), Some("10,20 800x600"));
+        assert_eq!(evened("0,0 801x601", |_, _| 2.0).as_deref(), Some("0,0 801x601"));
+        assert_eq!(evened("0,0 801x601", |_, _| 1.0).as_deref(), Some("0,0 800x600"));
         assert_eq!(qp_for("ultra"), 16);
         assert_eq!(crf_for("high", "av1"), 33);
         assert_eq!(hw_codec("hevc"), "hevc_vaapi");
