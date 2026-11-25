@@ -32,7 +32,11 @@ const SYSCTLS: &[&str] = &[
     "sys.device.drmn0.gpu_busy_percent",
     "sys.device.drmn0.vcn_busy_percent",
     "dev.apple_agx.0.busy_ns",
+    "dev.apple_agx.0.render_busy_ns",
+    "dev.apple_agx.0.compute_busy_ns",
 ];
+/// agxdrm's busy counters: the whole GPU, renders, compute.
+const AGX_BUSY: [&str; 3] = ["dev.apple_agx.0.busy_ns", "dev.apple_agx.0.render_busy_ns", "dev.apple_agx.0.compute_busy_ns"];
 
 #[derive(Clone, Default)]
 pub struct Disk {
@@ -50,6 +54,10 @@ pub struct Stats {
     pub gpu: Option<u32>,
     /// The video engine's load, alongside the GPU's.
     pub video: Option<u32>,
+    /// An Apple GPU's render and compute loads, alongside the GPU's. They
+    /// can overlap, so may add up to more than it.
+    pub render: Option<u32>,
+    pub compute: Option<u32>,
     pub disk: Option<Disk>,
     /// Bytes per second.
     pub disk_read: Option<f64>,
@@ -89,7 +97,7 @@ pub fn start() {
         let mut prev_times: Vec<u64> = Vec::new();
         let disk_device = disk_device().await;
         let mut prev_io: Option<(f64, f64, Instant)> = None;
-        let mut prev_gpu: Option<(f64, Instant)> = None;
+        let mut prev_gpu: Option<([Option<f64>; 3], Instant)> = None;
         let mut tick = 0u32;
         loop {
             let values = run(&[&["sysctl", "-i"][..], SYSCTLS].concat()).await.unwrap_or_default();
@@ -133,7 +141,7 @@ fn push(history: &mut VecDeque<f64>, value: Option<u32>) {
     }
 }
 
-fn apply_sysctls(s: &mut Stats, text: &str, prev_times: &mut Vec<u64>, prev_gpu: &mut Option<(f64, Instant)>) {
+fn apply_sysctls(s: &mut Stats, text: &str, prev_times: &mut Vec<u64>, prev_gpu: &mut Option<([Option<f64>; 3], Instant)>) {
     let values: HashMap<&str, &str> = text.lines().filter_map(|l| l.split_once(": ")).map(|(k, v)| (k, v.trim())).collect();
     let num = |key: &str| values.get(key).and_then(|v| v.parse::<f64>().ok());
     let percent = |busy: f64, total: f64| (100.0 * busy / total).round().clamp(0.0, 100.0) as u32;
@@ -172,17 +180,20 @@ fn apply_sysctls(s: &mut Stats, text: &str, prev_times: &mut Vec<u64>, prev_gpu:
         .find_map(|k| values.get(k).and_then(|v| v.trim_end_matches('C').parse::<f64>().ok()))
         .map(|t| t.round().max(0.0) as u32);
     s.gpu = num("sys.device.drmn0.gpu_busy_percent").map(|g| g.clamp(0.0, 100.0) as u32);
-    // The Apple GPU (agxdrm) counts busy nanoseconds instead; its load is
-    // that count's rate. The first reading has nothing to compare against.
-    if let Some(busy) = num("dev.apple_agx.0.busy_ns") {
+    s.video = num("sys.device.drmn0.vcn_busy_percent").map(|g| g.clamp(0.0, 100.0) as u32);
+    // The Apple GPU (agxdrm) counts busy nanoseconds instead, overall and
+    // for renders and compute; a load is its count's rate. The first reading
+    // has nothing to compare against.
+    let busy = AGX_BUSY.map(|k| num(k));
+    if busy[0].is_some() {
         let now = Instant::now();
         if let Some((before, at)) = *prev_gpu {
             let elapsed = now.duration_since(at).as_nanos() as f64;
-            s.gpu = (elapsed > 0.0).then(|| percent(busy - before, elapsed));
+            let load = |i: usize| busy[i].zip(before[i]).filter(|_| elapsed > 0.0).map(|(b, b0)| percent(b - b0, elapsed));
+            (s.gpu, s.render, s.compute) = (load(0), load(1), load(2));
         }
         *prev_gpu = Some((busy, now));
     }
-    s.video = num("sys.device.drmn0.vcn_busy_percent").map(|g| g.clamp(0.0, 100.0) as u32);
 
     let (cpu, mem, temp, gpu) = (s.cpu, s.mem, s.temp, s.gpu);
     push(&mut s.cpu_history, cpu);

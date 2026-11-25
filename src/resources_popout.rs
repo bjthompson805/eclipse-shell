@@ -102,9 +102,14 @@ fn body(s: f64, stats: &Stats) -> gtk::Box {
     if let Some(gpu) = stats.gpu {
         column.append(&metric(s, "GPU", &format!("{gpu}%"), &stats.gpu_history, 100.0, gpu > 85));
         let engines = gtk::Box::builder().spacing(px(GAP)).homogeneous(true).build();
-        engines.append(&cell(s, "GFX", &format!("{gpu}%"), f64::from(gpu) / 100.0, gpu > 85, 7.5));
-        if let Some(video) = stats.video {
-            engines.append(&cell(s, "VIDEO", &format!("{video}%"), f64::from(video) / 100.0, video > 85, 7.5));
+        // An Apple GPU splits into renders and compute; an AMD one into
+        // graphics and video.
+        let split = match (stats.render, stats.compute) {
+            (Some(render), Some(compute)) => vec![("RENDER", render), ("COMPUTE", compute)],
+            _ => [Some(("GFX", gpu)), stats.video.map(|v| ("VIDEO", v))].into_iter().flatten().collect(),
+        };
+        for (name, load) in split {
+            engines.append(&cell(s, name, &format!("{load}%"), f64::from(load) / 100.0, load > 85, 7.5));
         }
         column.append(&engines);
     }
