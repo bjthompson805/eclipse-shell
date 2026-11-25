@@ -37,13 +37,16 @@
 #       A keyboard or mouse through bthidd.
 #   eclipse-priv bt power on|off
 #       Detach or attach the adapter's driver.
+#   eclipse-priv pkg-update
+#       Refresh the package catalogue, so the hub's update check sees new
+#       versions.
 #
 # SPDX-License-Identifier: BSD-2-Clause
 set -eu
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 usage() {
-	sed -n '6,41p' "$0" >&2
+	sed -n '6,44p' "$0" >&2
 	exit 2
 }
 
@@ -488,6 +491,7 @@ bt() {
 	esac
 }
 
+[ "$*" = pkg-update ] && exec pkg update -q
 [ $# -ge 2 ] && [ $# -le 4 ] || usage
 case "$1" in
 power-profile) [ $# -eq 2 ] || usage; power_profile "$2" ;;

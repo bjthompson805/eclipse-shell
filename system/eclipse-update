@@ -1,0 +1,156 @@
+#!/bin/sh
+# eclipse-update: keeps eclipse-shell current. The checkout install.sh last
+# ran from is the channel; packages come from pkg.
+#
+#   eclipse-update status [--json]   commits behind origin + package upgrades
+#   eclipse-update update            boot environment, git pull, pkg upgrade,
+#                                    install.sh
+#   eclipse-update rollback <be>     boot a pre-update boot environment next
+#
+# `update` publishes its progress to $XDG_RUNTIME_DIR/eclipse-update.json,
+# which the hub's Updates page shows. It runs in a terminal so sudo can prompt.
+#
+# SPDX-License-Identifier: BSD-2-Clause
+set -u
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/eclipse-shell"
+run_state="${XDG_RUNTIME_DIR:-/tmp}/eclipse-update.json"
+
+if command -v doas >/dev/null 2>&1; then as_root=doas; else as_root=sudo; fi
+
+repo() {
+	r=$(cat "$state_dir/repo" 2>/dev/null)
+	[ -n "$r" ] && [ -d "$r/.git" ] || { echo "eclipse-update: no checkout recorded; run install.sh from one" >&2; exit 1; }
+	printf '%s' "$r"
+}
+
+priv() {
+	$as_root -n /usr/local/libexec/eclipse-priv "$@"
+}
+
+# Commits as {name, old, new} rows: subject, "", hash.
+commit_rows() {
+	git -C "$1" log --format='%h%x09%s' "$2" 2>/dev/null |
+		jq -R 'split("\t") | {name: (.[1:] | join("\t")), old: "", new: .[0]}' | jq -s .
+}
+
+# Packages with a newer version in the catalogue, as {name, old, new}.
+pkg_rows() {
+	pkg version -vRl '<' 2>/dev/null | awk '{
+		nv = $1; name = nv; sub(/-[^-]+$/, "", name); old = substr(nv, length(name) + 2)
+		new = ""; if (match($0, /remote has [^)]+/)) new = substr($0, RSTART + 11, RLENGTH - 11)
+		printf "%s\t%s\t%s\n", name, old, new
+	}' | jq -R 'split("\t") | {name: .[0], old: .[1], new: .[2]}' | jq -s .
+}
+
+status() {
+	r=$(repo)
+	git -C "$r" fetch -q origin 2>/dev/null
+	branch=$(git -C "$r" rev-parse --abbrev-ref HEAD)
+	head=$(git -C "$r" rev-parse --short HEAD)
+	if up=$(git -C "$r" rev-parse --short '@{u}' 2>/dev/null); then
+		behind=$(git -C "$r" rev-list --count 'HEAD..@{u}')
+		incoming=$(commit_rows "$r" 'HEAD..@{u}')
+	else
+		up=$head behind=0 incoming='[]'
+	fi
+	priv pkg-update >/dev/null 2>&1
+	pkgs=$(pkg_rows)
+	recent=$(commit_rows "$r" '-n8')
+	json=$(jq -n --arg head "$head" --arg up "$up" --arg branch "$branch" \
+		--argjson behind "$behind" --argjson incoming "$incoming" --argjson pkgs "$pkgs" --argjson recent "$recent" '{
+			installed: $head, latest: $up, branch: $branch,
+			commits: $incoming, packages: $pkgs, recent: $recent, behind: $behind
+		}')
+	if [ "${1:-}" = --json ]; then
+		printf '%s\n' "$json"
+	else
+		printf '%s\n' "$json" | jq -r '"branch:    \(.branch) @ \(.installed)",
+			"behind:    \(.behind) commit(s)", "packages:  \(.packages | length) upgrade(s)"'
+	fi
+}
+
+# ---- update run state --------------------------------------------------------
+
+steps="snapshot pull packages install"
+step_state=""
+log=""
+be=""
+
+publish() { # phase label [error]
+	jq -n --arg phase "$1" --arg label "$2" --arg error "${3:-}" --arg snapshot "$be" \
+		--arg steps "$step_state" --arg log "$log" '{
+			phase: $phase, label: $label, error: $error, snapshot: $snapshot,
+			steps: ($steps | split(" ") | map(select(. != "") | split("=") | {name: .[0], state: .[1]})),
+			log: ($log | split("\n") | map(select(. != "")) | .[-6:])
+		}' >"$run_state.tmp" && mv "$run_state.tmp" "$run_state"
+}
+
+set_step() { # name state
+	step_state=$(for s in $steps; do
+		v=$(printf '%s\n' $step_state | sed -n "s/^$s=//p")
+		[ "$s" = "$1" ] && v=$2
+		printf '%s=%s ' "$s" "${v:-pending}"
+	done)
+}
+
+say() {
+	echo "==> $*"
+	log="$log
+$*"
+}
+
+fail() { # step label message
+	set_step "$1" failed
+	publish error "$2" "$3"
+	echo "eclipse-update: $3" >&2
+	exit 1
+}
+
+update() {
+	r=$(repo)
+	for s in $steps; do set_step "$s" pending; done
+
+	set_step snapshot running; publish running "Snapshotting"
+	be="eclipse-pre-update-$(date +%Y%m%d-%H%M%S)"
+	say "creating boot environment $be"
+	if $as_root bectl create "$be"; then set_step snapshot ok
+	else be=""; set_step snapshot skipped; say "no boot environment (not on ZFS?), continuing"; fi
+
+	set_step pull running; publish running "Pulling"
+	say "git pull in $r"
+	git -C "$r" pull --ff-only || fail pull "Pulling" "git pull --ff-only failed in $r"
+	set_step pull ok
+
+	set_step packages running; publish running "Upgrading packages"
+	say "pkg upgrade"
+	$as_root pkg upgrade -y || fail packages "Upgrading packages" "pkg upgrade failed"
+	set_step packages ok
+
+	set_step install running; publish running "Installing"
+	say "install.sh"
+	"$r/install.sh" || fail install "Installing" "install.sh failed"
+	set_step install ok
+
+	say "done"
+	publish done "Update complete"
+	# The page shows "complete" for a moment, then goes back to its list.
+	sleep 3
+	publish idle ""
+}
+
+rollback() {
+	case "${1:-}" in
+	"" | *[!A-Za-z0-9._-]*) echo "usage: eclipse-update rollback <boot-environment>" >&2; exit 2 ;;
+	esac
+	bectl list -H | cut -f1 | grep -qxF "$1" || { echo "eclipse-update: no boot environment $1" >&2; exit 1; }
+	$as_root bectl activate "$1" || exit 1
+	echo "boot environment $1 is active from the next boot. reboot to roll back."
+}
+
+case "${1:-}" in
+status) status "${2:-}" ;;
+update) update ;;
+rollback) rollback "${2:-}" ;;
+*) sed -n '2,11p' "$0" >&2; exit 2 ;;
+esac

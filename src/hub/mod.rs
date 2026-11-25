@@ -7,6 +7,7 @@
 
 mod hypr;
 mod keybinds;
+mod updates;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -38,10 +39,11 @@ enum Page {
     Rules,
     Startup,
     Keybinds,
+    Updates,
 }
 
 impl Page {
-    const ALL: [Self; 10] = [Self::Bar, Self::Launcher, Self::Frame, Self::Clock, Self::Fonts, Self::Windows, Self::Rules, Self::Input, Self::Startup, Self::Keybinds];
+    const ALL: [Self; 11] = [Self::Bar, Self::Launcher, Self::Frame, Self::Clock, Self::Fonts, Self::Windows, Self::Rules, Self::Input, Self::Startup, Self::Keybinds, Self::Updates];
 
     fn name(self) -> &'static str {
         match self {
@@ -55,6 +57,7 @@ impl Page {
             Self::Rules => "Window rules",
             Self::Startup => "Startup",
             Self::Keybinds => "Keybinds",
+            Self::Updates => "Updates",
         }
     }
 
@@ -70,6 +73,7 @@ impl Page {
             Self::Rules => "rule",
             Self::Startup => "rocket_launch",
             Self::Keybinds => "keyboard",
+            Self::Updates => "system_update_alt",
         }
     }
 
@@ -85,6 +89,7 @@ impl Page {
             Self::Rules => "How an app's windows open: floating, centred, pinned, at a size or on a workspace. Rules apply to windows opened after the change.",
             Self::Startup => "What starts when you log in.",
             Self::Keybinds => "Every shortcut in your Hyprland config, read from binds.lua and user.lua.",
+            Self::Updates => "New commits to the checkout you installed from, and package upgrades. An update makes a boot environment first, so it can be rolled back.",
         }
     }
 }
@@ -254,6 +259,11 @@ struct Hub {
     about: gtk::Label,
     footer: gtk::Box,
     restarting: Cell<bool>,
+    /// The last update check, or why it failed; None until one finishes.
+    update_status: RefCell<Option<Result<updates::Status, String>>>,
+    checking: Cell<bool>,
+    /// The update run file as last read, to redraw when it changes.
+    run_text: RefCell<String>,
 }
 
 impl Hub {
@@ -299,6 +309,9 @@ impl Hub {
             about,
             footer: gtk::Box::new(gtk::Orientation::Horizontal, px(12.0)),
             restarting: Cell::new(false),
+            update_status: RefCell::default(),
+            checking: Cell::new(false),
+            run_text: RefCell::new(updates::run_text()),
         });
 
         // Left: the name, the search, the sections.
@@ -377,10 +390,204 @@ impl Hub {
         });
         hub.window.add_controller(keys);
 
+        // Follow an update run on the Updates page; check again once it ends.
+        glib::timeout_add_local(Duration::from_secs(1), {
+            let hub = Rc::downgrade(&hub);
+            move || {
+                let Some(hub) = hub.upgrade() else { return glib::ControlFlow::Break };
+                let text = updates::run_text();
+                if text != *hub.run_text.borrow() {
+                    let was_running = updates::run(&hub.run_text.borrow()).is_some_and(|r| r.phase == "running");
+                    *hub.run_text.borrow_mut() = text;
+                    if hub.page.get() == Page::Updates && hub.query.borrow().is_empty() {
+                        hub.show_content();
+                    }
+                    if was_running {
+                        hub.check_updates();
+                    }
+                }
+                glib::ControlFlow::Continue
+            }
+        });
+
         hub.show();
         hub.window.present();
         search.grab_focus();
+        hub.check_updates();
         hub
+    }
+
+    /// Runs the update check in the background, then redraws the page.
+    fn check_updates(self: &Rc<Self>) {
+        if self.checking.replace(true) {
+            return;
+        }
+        if self.page.get() == Page::Updates {
+            self.show_content();
+        }
+        let (done, finished) = async_channel::bounded(1);
+        std::thread::spawn(move || {
+            let _ = done.send_blocking(updates::check());
+        });
+        let hub = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Ok(status) = finished.recv().await else { return };
+            if let Some(hub) = hub.upgrade() {
+                hub.checking.set(false);
+                *hub.update_status.borrow_mut() = Some(status);
+                if hub.page.get() == Page::Updates && hub.query.borrow().is_empty() {
+                    hub.show_content();
+                }
+            }
+        });
+    }
+
+    fn show_updates(self: &Rc<Self>) {
+        let s = self.s;
+        let px = |v: f64| (v * s).round() as i32;
+        let line = || {
+            let line = gtk::Box::new(gtk::Orientation::Horizontal, px(12.0));
+            line.set_margin_start(px(16.0));
+            line.set_margin_end(px(16.0));
+            line.set_margin_top(px(9.0));
+            line.set_margin_bottom(px(9.0));
+            line
+        };
+        let run = updates::run(&self.run_text.borrow());
+        let running = run.as_ref().is_some_and(|r| r.phase == "running");
+
+        // The install, what's waiting, and the buttons.
+        let status = self.update_status.borrow().clone();
+        let head = line();
+        let words = gtk::Box::new(gtk::Orientation::Vertical, px(3.0));
+        words.set_hexpand(true);
+        words.set_valign(gtk::Align::Center);
+        let plural = |n: usize| if n == 1 { "" } else { "s" };
+        let (title, detail) = match &status {
+            _ if self.checking.get() => ("Checking for updates…".to_owned(), "Fetching the checkout's origin and the package catalogue.".to_owned()),
+            None => ("Not checked yet".to_owned(), String::new()),
+            Some(Err(e)) => ("Couldn't check for updates".to_owned(), e.clone()),
+            Some(Ok(st)) => {
+                let title = match (st.commits.len(), st.packages.len()) {
+                    (0, 0) => "Up to date".to_owned(),
+                    (c, 0) => format!("{c} new commit{}", plural(c)),
+                    (0, p) => format!("{p} package upgrade{}", plural(p)),
+                    (c, p) => format!("{c} new commit{} and {p} package upgrade{}", plural(c), plural(p)),
+                };
+                (title, format!("{} @ {}", st.branch, st.installed))
+            }
+        };
+        let label = TextStyle::new(11.5 * s, pango::Weight::Semibold, CREAM).label(&title);
+        label.set_xalign(0.0);
+        words.append(&label);
+        if !detail.is_empty() {
+            let note = TextStyle::new(10.0 * s, pango::Weight::Medium, DIM).mono().label(&detail);
+            note.set_xalign(0.0);
+            note.set_wrap(true);
+            words.append(&note);
+        }
+        head.append(&words);
+        let hub = Rc::downgrade(self);
+        head.append(&ui::button(s, Some("refresh"), "Check now", false, !self.checking.get() && !running, move || {
+            if let Some(hub) = hub.upgrade() {
+                hub.check_updates();
+            }
+        }));
+        let pending = matches!(&status, Some(Ok(st)) if st.pending() > 0);
+        let hub = Rc::downgrade(self);
+        head.append(&ui::button(s, Some("download"), "Update", true, pending && !running, move || {
+            if let Some(hub) = hub.upgrade() {
+                match updates::start() {
+                    Ok(()) => hub.flash("Updating in a terminal; it asks for your password there."),
+                    Err(e) => hub.flash(&format!("Couldn't open foot: {e}")),
+                }
+            }
+        }));
+        self.content.append(&popout::card(&head));
+
+        // A run in progress, or how the last one ended.
+        if let Some(run) = &run {
+            self.content.append(&popout::eyebrow(s, if running { "Updating" } else { "Last update" }));
+            let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let top = line();
+            let failed = run.phase == "error";
+            let label = TextStyle::new(11.5 * s, pango::Weight::Semibold, if failed { theme::palette().accent_lit } else { CREAM }).label(if failed { &run.error } else { &run.label });
+            label.set_xalign(0.0);
+            label.set_wrap(true);
+            popout::fill(&label);
+            top.append(&label);
+            list.append(&top);
+            for step in &run.steps {
+                list.append(&popout::divider());
+                let row = line();
+                let glyph = match step.state.as_str() {
+                    "ok" => "check_circle",
+                    "running" => "progress_activity",
+                    "failed" => "error",
+                    "skipped" => "skip_next",
+                    _ => "radio_button_unchecked",
+                };
+                let lit = matches!(step.state.as_str(), "ok" | "running" | "failed");
+                row.append(&theme::icon_glyph(glyph, 16.0 * s, if lit { theme::palette().accent_lit } else { theme::ICON_DIM }));
+                let name = match step.name.as_str() {
+                    "snapshot" => "Boot environment",
+                    "pull" => "Pull the checkout",
+                    "packages" => "Upgrade packages",
+                    "install" => "Run install.sh",
+                    other => other,
+                };
+                let label = TextStyle::new(11.0 * s, pango::Weight::Medium, if lit { CREAM } else { SUBTLE }).label(name);
+                popout::fill(&label);
+                row.append(&label);
+                list.append(&row);
+            }
+            if !run.log.is_empty() {
+                list.append(&popout::divider());
+                let log = TextStyle::new(9.5 * s, pango::Weight::Medium, DIM).mono().label(&run.log.join("\n"));
+                log.set_xalign(0.0);
+                log.set_wrap(true);
+                log.set_margin_start(px(16.0));
+                log.set_margin_end(px(16.0));
+                log.set_margin_top(px(9.0));
+                log.set_margin_bottom(px(9.0));
+                list.append(&log);
+            }
+            self.content.append(&popout::card(&list));
+            if !run.snapshot.is_empty() && !running {
+                let note = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).mono().label(&format!("To roll back: eclipse-update rollback {}, then reboot.", run.snapshot));
+                note.set_xalign(0.0);
+                note.set_wrap(true);
+                note.set_margin_start(px(4.0));
+                self.content.append(&note);
+            }
+        }
+
+        // What's incoming, else what the install already has.
+        let Some(Ok(st)) = &status else { return };
+        let recent: &[updates::Item] = if st.pending() == 0 { &st.recent } else { &[] };
+        let sections: [(&str, &[updates::Item], bool); 3] = [("Incoming commits", &st.commits, false), ("Package upgrades", &st.packages, true), ("Recent changes", recent, false)];
+        for (heading, items, package) in sections {
+            if items.is_empty() {
+                continue;
+            }
+            self.content.append(&popout::eyebrow(s, heading));
+            let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    list.append(&popout::divider());
+                }
+                let row = line();
+                let name = TextStyle::new(11.0 * s, pango::Weight::Medium, CREAM).label(&item.name);
+                name.set_xalign(0.0);
+                name.set_ellipsize(pango::EllipsizeMode::End);
+                popout::fill(&name);
+                row.append(&name);
+                let version = if package { format!("{} → {}", item.old, item.new) } else { item.new.clone() };
+                row.append(&TextStyle::new(9.5 * s, pango::Weight::Medium, FAINT).mono().label(&version));
+                list.append(&row);
+            }
+            self.content.append(&popout::card(&list));
+        }
     }
 
     fn show(self: &Rc<Self>) {
@@ -462,6 +669,8 @@ impl Hub {
                 self.show_startup();
             } else if page == Page::Rules {
                 self.show_rules();
+            } else if page == Page::Updates {
+                self.show_updates();
             } else {
                 self.show_rows(|r| r.page == page);
             }
@@ -935,6 +1144,13 @@ impl Hub {
         }
         if self.query.borrow().is_empty() && matches!(self.page.get(), Page::Startup | Page::Rules) {
             let status = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label("Kept in ~/.config/hypr/eclipse.lua with the hub's other Hyprland changes.");
+            popout::fill(&status);
+            self.footer.append(&status);
+            return;
+        }
+        if self.query.borrow().is_empty() && self.page.get() == Page::Updates {
+            let text = updates::repo().map_or_else(|| "No checkout recorded yet; run install.sh from one.".to_owned(), |r| format!("Follows the checkout at {}", r.replace(&glib::home_dir().display().to_string(), "~")));
+            let status = TextStyle::new(10.0 * s, pango::Weight::Medium, FAINT).label(&text);
             popout::fill(&status);
             self.footer.append(&status);
             return;
