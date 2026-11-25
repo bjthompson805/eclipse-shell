@@ -15,7 +15,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::anim::{self, Easing, Tween};
 use crate::theme::{self, DIM, TextStyle};
-use crate::{config, hint, hyprland, mark};
+use crate::{config, hint, hyprland, mark, notch};
 
 const OPEN_MS: f64 = 500.0;
 const CLOSE_MS: f64 = 420.0;
@@ -163,7 +163,7 @@ impl Popout {
         if let Some((_, s)) = &self.pane {
             return s.get();
         }
-        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
+        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, notch::height))
     }
 
     /// The layer for hover hints over the card; see [`hint::float_below`].
@@ -192,7 +192,7 @@ impl Popout {
         let s = self.scale();
         self.window.set_monitor(monitor.as_ref());
         // The card starts a little above the bar's edge line so it covers it.
-        let line = config::get().frame_edge + config::get().bar_height * s;
+        let line = config::get().frame_edge + config::get().bar_height * s + monitor.as_ref().map_or(0.0, notch::strip);
         let top = (line - 2.0).floor();
         self.top.set(top);
         self.seam.set(line - top);

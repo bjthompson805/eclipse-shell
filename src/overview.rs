@@ -22,7 +22,7 @@ use crate::hint;
 use crate::hyprland::{self, Layout, Placed, Screen};
 use crate::popout::{self, on_hover};
 use crate::theme::{self, TextStyle, BRIGHT, CREAM, SUBTLE};
-use crate::{config, icons, wallpaper};
+use crate::{config, icons, notch, wallpaper};
 
 const NAMESPACE: &str = "eclipse-shell-overview";
 const FADE_MS: f64 = 180.0;
@@ -181,7 +181,7 @@ impl Overview {
     }
 
     fn scale(&self) -> f64 {
-        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
+        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, notch::height))
     }
 
     fn show(self: &Rc<Self>) {

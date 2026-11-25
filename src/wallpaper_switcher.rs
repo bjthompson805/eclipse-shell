@@ -24,7 +24,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::anim::{self, Easing, Tween, MORPH};
 use crate::theme::{self, Rgba, TextStyle, BRIGHT, CREAM, DIM, FAINT, HAIR, SCRIM};
-use crate::{config, hyprland, popout, wallpaper};
+use crate::{config, hyprland, notch, popout, wallpaper};
 
 const NAMESPACE: &str = "eclipse-shell-wallpapers";
 const OPEN_MS: f64 = 240.0;
@@ -179,7 +179,7 @@ impl WallpaperSwitcher {
     }
 
     fn scale(&self) -> f64 {
-        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
+        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, notch::height))
     }
 
     fn device_scale(&self) -> f64 {

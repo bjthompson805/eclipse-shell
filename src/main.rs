@@ -26,6 +26,7 @@ mod mark;
 mod media;
 mod media_popout;
 mod network_popout;
+mod notch;
 mod notifications;
 mod osd;
 mod profile;

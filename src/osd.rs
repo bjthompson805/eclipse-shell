@@ -23,7 +23,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::anim::{self, Easing, Tween, MORPH};
 use crate::theme::{self, TextStyle, CREAM, DIM, FAINT, HAIR, ICON_DIM};
-use crate::{config, hyprland};
+use crate::{config, hyprland, notch};
 
 const SHOW_FOR: Duration = Duration::from_millis(1400);
 const FADE_MS: f64 = 160.0;
@@ -172,14 +172,15 @@ impl Osd {
     }
 
     fn scale(&self) -> f64 {
-        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
+        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, notch::height))
     }
 
     /// Shows the panel as it now reads, and hides it after a moment.
     fn show(self: &Rc<Self>) {
         let s = self.scale();
         self.window.set_monitor(self.monitor.borrow().as_ref());
-        self.window.set_margin(Edge::Top, (config::get().frame_edge + config::get().bar_height * s + 10.0 * s).round() as i32);
+        let strip = self.monitor.borrow().as_ref().map_or(0.0, notch::strip);
+        self.window.set_margin(Edge::Top, (config::get().frame_edge + config::get().bar_height * s + strip + 10.0 * s).round() as i32);
         self.window.set_default_size((WIDTH * s).round() as i32, (HEIGHT * s).round() as i32);
         // On the backdrop, not the row: the row's margins sit inside this size.
         let panel = self.window.child().and_downcast::<gtk::Overlay>().expect("the panel");

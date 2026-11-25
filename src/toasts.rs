@@ -18,7 +18,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use crate::notifications::{self, Change, Notification, Picture, Urgency};
 use crate::popout::{on_click, on_hover};
 use crate::theme::{self, TextStyle, CREAM, DIM, FAINT, ICON_DIM, SUBTLE};
-use crate::{config, popout};
+use crate::{config, notch, popout};
 
 const SHOWN: usize = 3;
 const WIDTH: f64 = 360.0;
@@ -68,7 +68,7 @@ impl Toasts {
     }
 
     fn scale(&self) -> f64 {
-        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
+        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, notch::height))
     }
 
     fn changed(self: &Rc<Self>, change: Change) {

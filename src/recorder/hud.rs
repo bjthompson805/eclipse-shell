@@ -25,7 +25,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use super::{active, chooser_open, clock_label, elapsed, elapsed_text, icon_button, pulse_dot, region, starting, RED};
 use crate::theme::{self, TextStyle, CREAM, FAINT, SUBTLE};
-use crate::{config, hyprland, popout};
+use crate::{config, hyprland, notch, popout};
 
 const NAMESPACE: &str = "eclipse-shell-recorder";
 const MELT: Duration = Duration::from_millis(200);
@@ -199,8 +199,7 @@ impl Hud {
         if self.window.is_visible() {
             return;
         }
-        let height = monitor.as_ref().map_or(1080, |m| m.geometry().height());
-        self.s.set(config::bar_scale(height));
+        self.s.set(config::bar_scale(monitor.as_ref().map_or(1080, notch::height)));
         self.key.borrow_mut().clear();
         *self.monitor.borrow_mut() = monitor;
     }
@@ -336,7 +335,7 @@ impl Hud {
         let fe = config::get().frame_edge;
         match side {
             Side::Bottom => h - fe,
-            Side::Top => fe + config::get().bar_height * self.s.get(),
+            Side::Top => fe + config::get().bar_height * self.s.get() + self.monitor.borrow().as_ref().map_or(0.0, notch::strip),
             Side::Left => fe,
             Side::Right => w - fe,
         }

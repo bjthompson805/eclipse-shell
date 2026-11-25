@@ -31,6 +31,7 @@ use crate::config;
 use crate::hyprland::State;
 use crate::hint;
 use crate::mark;
+use crate::notch::{self, Notch};
 use crate::theme;
 use module::{Module, ModuleSpec};
 use title::Title;
@@ -89,9 +90,13 @@ pub struct Bar {
 
 impl Bar {
     pub fn new(app: &gtk::Application, monitor: &gdk::Monitor, actions: &Rc<Actions>) -> Self {
-        let s = config::bar_scale(monitor.geometry().height());
+        let s = config::bar_scale(notch::height(monitor));
         let band = config::get().bar_height * s;
-        let top = config::get().frame_edge + band;
+        // Beside a camera cutout, the strip either side of it sits above the
+        // band and carries some of its modules.
+        let notch = notch::notch(monitor);
+        let strip = notch.map_or(0.0, |n| n.height);
+        let top = strip + config::get().frame_edge + band;
 
         let reserve = layer_window(app, monitor, "eclipse-shell-reserve");
         reserve.set_layer(Layer::Top);
@@ -141,12 +146,17 @@ impl Bar {
         let title = Title::new(s);
         // Hover hints float just under the band.
         let hints = hint::layer();
-        let (content, anchors) = band_content(s, band, &workspaces, &title, actions, &hints, top + 6.0 * s);
-        content.set_size_request(-1, top.round() as i32);
+        let ears = notch.map(|n| Ears::new(s, n));
+        let (content, anchors) = band_content(s, band, &workspaces, &title, actions, &hints, top + 6.0 * s, ears.as_ref());
+        content.set_margin_top(strip.round() as i32);
+        content.set_size_request(-1, (top - strip).round() as i32);
 
         let layers = gtk::Overlay::new();
         layers.set_child(Some(&canvas));
         layers.add_overlay(&content);
+        if let Some(ears) = &ears {
+            layers.add_overlay(&ears.row);
+        }
         layers.add_overlay(&hints);
         frame.set_child(Some(&layers));
         let motion = gtk::EventControllerMotion::new();
@@ -280,6 +290,31 @@ fn layer_window(app: &gtk::Application, monitor: &gdk::Monitor, namespace: &str)
     window
 }
 
+/// The strip either side of a camera cutout: the window title in the left
+/// ear, now playing in the right, both pinned to the screen's outer edges.
+/// Each ear is wider than either module's cap, so neither reaches the cutout.
+struct Ears {
+    row: gtk::Box,
+    left: gtk::Box,
+    right: gtk::Box,
+}
+
+impl Ears {
+    fn new(s: f64, notch: Notch) -> Self {
+        let edge_margin = (24.0 * s).round() as i32;
+        let ear = || gtk::Box::builder().spacing((8.0 * s).round() as i32).valign(gtk::Align::Center).build();
+        let (left, right) = (ear(), ear());
+        left.set_margin_start(edge_margin);
+        left.set_hexpand(true);
+        left.set_halign(gtk::Align::Start);
+        right.set_margin_end(edge_margin);
+        let row = gtk::Box::builder().valign(gtk::Align::Start).height_request(notch.height.round() as i32).build();
+        row.append(&left);
+        row.append(&right);
+        Self { row, left, right }
+    }
+}
+
 /// Limits pointer input to a strip along the top; the rest of the surface
 /// lets clicks through to the windows underneath.
 fn set_input_rect(window: &impl IsA<gtk::Native>, width: i32, height: i32) {
@@ -326,7 +361,8 @@ fn draw_frame(cr: &cairo::Context, w: f64, h: f64, top: f64) {
 /// The band: mark, workspaces, system stats, agent usage and title on the left, the clock centred, and
 /// now playing, network speed, the status cluster, weather, the tray and the power button on the right.
 /// `hints` is the layer hover hints float on, with their tops at `hint_y`.
-fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>, hints: &gtk::Fixed, hint_y: f64) -> (gtk::Overlay, Anchors) {
+/// Beside a camera cutout, the title and now playing go in `ears` instead.
+fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title>, actions: &Rc<Actions>, hints: &gtk::Fixed, hint_y: f64, ears: Option<&Ears>) -> (gtk::Overlay, Anchors) {
     let mut anchors = Anchors::default();
     let span = (band * 0.76).round();
     let edge_margin = (24.0 * s).round() as i32;
@@ -379,7 +415,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         left.append(&usage.widget);
         usage.widget.upcast::<gtk::Widget>()
     });
-    left.append(&title.widget);
+    ears.map_or(&left, |e| &e.left).append(&title.widget);
     title.widget.set_cursor_from_name(Some("pointer"));
     let click = gtk::GestureClick::new();
     click.connect_released({
@@ -447,7 +483,7 @@ fn band_content(s: f64, band: f64, workspaces: &Rc<Workspaces>, title: &Rc<Title
         media.widget.add_controller(scroll);
         playing.bind_property("visible", &media.widget, "visible").sync_create().build();
         anchors.media = Some(media.widget.clone().upcast());
-        right.append(&media.widget);
+        ears.map_or(&right, |e| &e.right).append(&media.widget);
     }
     if config::get().bar_net_speed {
         let speed = Module::new(&net_speed::net_speed(s), pill(6.0 * s));

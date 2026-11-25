@@ -18,7 +18,7 @@ use gtk4 as gtk;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::anim::{self, Tween, MORPH};
-use crate::{config, hint, hyprland, theme};
+use crate::{config, hint, hyprland, notch, theme};
 
 const OPEN_MS: f64 = 380.0;
 /// How long the pointer rests in the corner before the panel opens.
@@ -191,12 +191,13 @@ impl Sidebar {
     }
 
     pub fn scale(&self) -> f64 {
-        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, |m| m.geometry().height()))
+        config::bar_scale(self.monitor.borrow().as_ref().map_or(1080, notch::height))
     }
 
     /// Where the panel's surface starts: the bar's underside, less the overlap.
     fn top(&self) -> f64 {
-        config::get().frame_edge + config::get().bar_height * self.scale() - OVERLAP
+        let strip = self.monitor.borrow().as_ref().map_or(0.0, notch::strip);
+        config::get().frame_edge + config::get().bar_height * self.scale() + strip - OVERLAP
     }
 
     fn height(&self) -> i32 {
@@ -217,10 +218,10 @@ impl Sidebar {
     pub fn track_bar(self: &Rc<Self>, monitor: &gdk::Monitor, at: Option<(f64, f64)>) {
         let same_monitor = self.monitor.borrow().as_ref() == Some(monitor);
         let width = f64::from(monitor.geometry().width());
-        let s = config::bar_scale(monitor.geometry().height());
+        let (s, strip) = (config::bar_scale(notch::height(monitor)), notch::strip(monitor));
         let inside = at.is_some_and(|(x, y)| {
             let from_edge = if self.side == Side::Left { x } else { width - x };
-            let corner = from_edge <= REACH * s && y <= REACH * s;
+            let corner = from_edge <= REACH * s && y <= strip + REACH * s;
             // Once open, the bar strip above the panel keeps it open, so the
             // pointer can travel down from the corner.
             corner || (self.open.get() && same_monitor && from_edge <= self.width * s)
