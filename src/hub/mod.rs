@@ -566,11 +566,11 @@ impl Hub {
             }
         }
 
-        // What's incoming, else what the install already has.
+        // What an update would apply; nothing when up to date.
         let Some(Ok(st)) = &status else { return };
-        let (heading, items) = if st.commits.is_empty() { ("Recent changes", &st.recent) } else { ("Incoming commits", &st.commits) };
+        let items = &st.commits;
         if !items.is_empty() {
-            self.content.append(&popout::eyebrow(s, heading));
+            self.content.append(&popout::eyebrow(s, "Pending changes"));
             let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {

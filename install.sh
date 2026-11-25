@@ -88,6 +88,7 @@ cargo install --quiet --path "$repo" --root "$HOME/.local"
 install -m 755 "$repo/system/eclipse-update" "$HOME/.local/bin/eclipse-update"
 mkdir -p "$HOME/.local/state/eclipse-shell"
 printf '%s\n' "$repo" >"$HOME/.local/state/eclipse-shell/repo"
+git -C "$repo" rev-parse HEAD >"$HOME/.local/state/eclipse-shell/installed" 2>/dev/null || :
 # The wallpaper browser, for the launcher.
 mkdir -p "$HOME/.local/share/applications"
 cp "$repo/data/io.github.bjthompson805.EclipseWalls.desktop" "$HOME/.local/share/applications/"

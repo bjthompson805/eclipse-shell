@@ -22,7 +22,6 @@ pub struct Status {
     pub installed: String,
     /// What a pull would bring in.
     pub commits: Vec<Commit>,
-    pub recent: Vec<Commit>,
 }
 
 fn commits(v: &Value) -> Vec<Commit> {
@@ -50,7 +49,7 @@ pub fn check() -> Result<Status, String> {
     }
     let v: Value = serde_json::from_slice(&out.stdout).map_err(|_| "eclipse-update gave no status.".to_owned())?;
     let text = |k: &str| v[k].as_str().unwrap_or_default().to_owned();
-    Ok(Status { branch: text("branch"), installed: text("installed"), commits: commits(&v["commits"]), recent: commits(&v["recent"]) })
+    Ok(Status { branch: text("branch"), installed: text("installed"), commits: commits(&v["commits"]) })
 }
 
 /// A step of a run: snapshot, pull, install; its state is

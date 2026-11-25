@@ -34,18 +34,21 @@ status() {
 	r=$(repo)
 	git -C "$r" fetch -q origin 2>/dev/null
 	branch=$(git -C "$r" rev-parse --abbrev-ref HEAD)
-	head=$(git -C "$r" rev-parse --short HEAD)
+	# What install.sh last installed, not what the checkout has: a pull
+	# without an install still leaves those commits to apply.
+	installed=$(cat "$state_dir/installed" 2>/dev/null)
+	git -C "$r" cat-file -e "${installed:-none}^{commit}" 2>/dev/null || installed=HEAD
+	head=$(git -C "$r" rev-parse --short "$installed")
 	if up=$(git -C "$r" rev-parse --short '@{u}' 2>/dev/null); then
-		behind=$(git -C "$r" rev-list --count 'HEAD..@{u}')
-		incoming=$(commit_rows "$r" 'HEAD..@{u}')
+		behind=$(git -C "$r" rev-list --count "$installed..@{u}")
+		incoming=$(commit_rows "$r" "$installed..@{u}")
 	else
 		up=$head behind=0 incoming='[]'
 	fi
-	recent=$(commit_rows "$r" '-n8')
 	json=$(jq -n --arg head "$head" --arg up "$up" --arg branch "$branch" \
-		--argjson behind "$behind" --argjson incoming "$incoming" --argjson recent "$recent" '{
+		--argjson behind "$behind" --argjson incoming "$incoming" '{
 			installed: $head, latest: $up, branch: $branch,
-			commits: $incoming, recent: $recent, behind: $behind
+			commits: $incoming, behind: $behind
 		}')
 	if [ "${1:-}" = --json ]; then
 		printf '%s\n' "$json"
