@@ -124,13 +124,15 @@ fn float(widget: &impl IsA<gtk::Widget>, layer: impl Fn(&gtk::Widget) -> Option<
         let Some(below) = widget.compute_point(&layer, &gtk::graphene::Point::new(widget.width() as f32 / 2.0, widget.height() as f32)) else { return };
         let hint = make();
         let width = f64::from(hint.measure(gtk::Orientation::Horizontal, -1).1);
-        let height = f64::from(hint.measure(gtk::Orientation::Vertical, -1).1);
+        // Height for that width: a wrapped note asked for its height at no
+        // particular width answers at one word per line.
+        let height = f64::from(hint.measure(gtk::Orientation::Vertical, width as i32).1);
         let edge = 6.0 * s;
         let x = (f64::from(below.x()) - width / 2.0).clamp(edge, (f64::from(layer.width()) - width - edge).max(edge));
         let top = y.unwrap_or_else(|| {
             let under = f64::from(below.y()) + 6.0 * s;
             if under + height > f64::from(layer.height()) - edge && layer.height() > 0 {
-                f64::from(below.y()) - f64::from(widget.height()) - 6.0 * s - height
+                (f64::from(below.y()) - f64::from(widget.height()) - 6.0 * s - height).max(edge)
             } else {
                 under
             }
