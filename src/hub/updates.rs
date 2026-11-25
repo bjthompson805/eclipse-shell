@@ -93,16 +93,15 @@ pub fn run(text: &str) -> Option<Run> {
     Some(Run { phase, label: text("label"), error: text("error"), snapshot: text("snapshot"), steps, log })
 }
 
+/// Terminals to run an update in, first found wins, each with the flags
+/// that keep it open after the command ends.
+const TERMINALS: &[(&str, &[&str])] = &[("foot", &["--title", "Eclipse update", "--hold", "--"]), ("kitty", &["--title", "Eclipse update", "--hold", "--"]), ("alacritty", &["--title", "Eclipse update", "--hold", "-e"]), ("xterm", &["-T", "Eclipse update", "-hold", "-e"])];
+
 /// Starts an update in a terminal, where sudo can ask for a password.
 pub fn start() -> std::io::Result<()> {
     use std::os::unix::process::CommandExt;
-    let script = script();
-    Command::new("foot")
-        .args(["--title", "Eclipse update", "--hold", "--"])
-        .arg(script)
-        .arg("update")
-        .process_group(0)
-        .stdin(std::process::Stdio::null())
-        .spawn()
-        .map(|_| ())
+    let Some((terminal, flags)) = TERMINALS.iter().find(|(t, _)| glib::find_program_in_path(t).is_some()) else {
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no terminal found (foot, kitty, alacritty or xterm)"));
+    };
+    Command::new(terminal).args(*flags).arg(script()).arg("update").process_group(0).stdin(std::process::Stdio::null()).spawn().map(|_| ())
 }

@@ -497,7 +497,7 @@ impl Hub {
             if let Some(hub) = hub.upgrade() {
                 match updates::start() {
                     Ok(()) => hub.flash("Updating in a terminal; it asks for your password there."),
-                    Err(e) => hub.flash(&format!("Couldn't open foot: {e}")),
+                    Err(e) => hub.flash(&format!("Couldn't open a terminal: {e}")),
                 }
             }
         }));
