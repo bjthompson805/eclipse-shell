@@ -36,6 +36,7 @@ mod n1wifi;
 mod overview;
 mod popout;
 mod power;
+mod recorder;
 mod resources_popout;
 mod sysstats;
 mod theme;
@@ -154,6 +155,7 @@ impl Shell {
         self.wallpapers.set_monitor(focused.clone());
         self.battery.set_monitor(focused.clone());
         self.window.set_monitor(focused.clone());
+        recorder::set_monitor(focused.clone());
         self.resources.set_monitor(focused);
     }
 }
@@ -294,6 +296,7 @@ fn start(app: &gtk::Application) -> Option<Surfaces> {
     let battery = BatteryPopout::new(app);
     let window = WindowPopout::new(app);
     let resources = ResourcesPopout::new(app);
+    recorder::start(app);
     let shell = Rc::new(RefCell::new(Shell { bars: Vec::new(), state: State::default(), launcher: launcher.clone(), power: power.clone(), calendar: calendar.clone(), usage: usage.clone(), mixer: mixer.clone(), display: display_popout.clone(), network: network.clone(), bluetooth: bluetooth.clone(), media: media_popout.clone(), weather: weather_popout.clone(), traffic: traffic_popout.clone(), workspaces: workspaces_popout.clone(), overview: overview.clone(), toasts, inbox: inbox.clone(), clipboard: clipboard.clone(), osd: osd.clone(), profile: profile.clone(), controls: controls.clone(), wallpapers: wallpapers.clone(), battery: battery.clone(), window: window.clone(), resources: resources.clone() }));
     rebuild_bars(app, &display, &shell);
 
@@ -332,6 +335,14 @@ fn main() -> glib::ExitCode {
         return hub::run(&args[2..]);
     }
     // Updates run here, in the caller's terminal, not in the running shell.
+    // So do recordings (wf-recorder outlives the command), and the
+    // recorder has an app of its own.
+    if args.get(1).map(String::as_str) == Some("record") {
+        return recorder::cli::main(&args[2..]);
+    }
+    if args.get(1).map(String::as_str) == Some("recorder") {
+        return recorder::app::run();
+    }
     if args.get(1).map(String::as_str) == Some("update") {
         return update::main(&args[2..]);
     }
@@ -538,6 +549,14 @@ fn main() -> glib::ExitCode {
                     surfaces.wallpapers.toggle();
                 }
             }
+            Some("toggle-recorder") => {
+                if let Some(surfaces) = surfaces.get() {
+                    let shell = surfaces.shell.borrow();
+                    let at = shell.focused_bar().and_then(Bar::recorder_at);
+                    recorder::toggle_deck(at);
+                }
+            }
+            Some("record-chooser") => recorder::open_chooser(),
             Some("wallpaper-next") => wallpaper::next(),
             Some("wallpaper-set") => {
                 // --keep-colours: show it without re-theming the desktop.
