@@ -165,7 +165,8 @@ bind = SUPER, Tab, exec, $bin toggle-overview
 bind = SUPER, Escape, exec, $bin toggle-power
 bind = SUPER, comma, exec, $bin hub
 bind = SUPER, K, exec, $bin hub keybinds
-bind = SUPER, W, exec, $bin wallpaper-next
+bind = SUPER, W, exec, $bin toggle-wallpapers
+bind = SUPER ALT, W, exec, $bin wallpaper-next
 bind = SUPER SHIFT, W, exec, $bin walls
 EOF
 		say "added eclipse-shell to Hyprland's startup (~/.config/hypr/hyprland.conf)"
@@ -192,7 +193,8 @@ hl.bind("SUPER + Tab",        hl.dsp.exec_cmd(shell .. " toggle-overview"))
 hl.bind("SUPER + Escape",     hl.dsp.exec_cmd(shell .. " toggle-power"))
 hl.bind("SUPER + comma",      hl.dsp.exec_cmd(shell .. " hub"))
 hl.bind("SUPER + K",          hl.dsp.exec_cmd(shell .. " hub keybinds"))
-hl.bind("SUPER + W",          hl.dsp.exec_cmd(shell .. " wallpaper-next"))
+hl.bind("SUPER + W",          hl.dsp.exec_cmd(shell .. " toggle-wallpapers"))
+hl.bind("SUPER + ALT + W",    hl.dsp.exec_cmd(shell .. " wallpaper-next"))
 hl.bind("SUPER + SHIFT + W",  hl.dsp.exec_cmd(shell .. " walls"))
 
 -- what the hub (Super + ,) changes in Hyprland: options, startup commands,
