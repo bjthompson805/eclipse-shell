@@ -14,11 +14,12 @@ use gtk::{cairo, gdk, gio, glib, pango};
 use gtk4 as gtk;
 
 use crate::popout::{Anchor, Popout};
-use crate::theme::{self, TextStyle, BRIGHT, CREAM, FAINT, ICON_DIM, SUBTLE};
+use crate::theme::{self, TextStyle, BRIGHT, CHIP_EDGE, CHIP_FILL, CREAM, FAINT, FLAME_CORE, ICON_DIM, SUBTLE};
 use crate::{config, hyprland, mark};
 
 const NAMESPACE: &str = "eclipse-shell-power";
 const HOLD_MS: f64 = 1100.0;
+/// A released hold drains back to empty over this long, however full it got.
 const DRAIN_MS: f64 = 180.0;
 /// Device pixels of hero height to decode the wallpaper at: enough to
 /// cover the card's hero on a 1.5x display without upscaling.
@@ -212,6 +213,7 @@ impl Power {
             }
         });
 
+        let holding = Rc::new(Cell::new(false));
         let motion = gtk::EventControllerMotion::new();
         motion.connect_enter({
             let (tile, hovered) = (tile.downgrade(), hovered.clone());
@@ -220,17 +222,18 @@ impl Power {
                 tile.upgrade().into_iter().for_each(|t| t.queue_draw());
             }
         });
+        // Leaving the tile lets go of the hold.
         motion.connect_leave({
-            let (tile, hovered) = (tile.downgrade(), hovered.clone());
+            let (tile, hovered, holding) = (tile.downgrade(), hovered.clone(), holding.clone());
             move |_| {
                 hovered.set(false);
+                holding.set(false);
                 tile.upgrade().into_iter().for_each(|t| t.queue_draw());
             }
         });
         tile.add_controller(motion);
 
         let press = gtk::GestureClick::new();
-        let holding = Rc::new(Cell::new(false));
         press.connect_pressed({
             let (power, tile, fill, fired, holding) = (Rc::downgrade(self), tile.downgrade(), fill.clone(), fired.clone(), holding.clone());
             move |_, _, _, _| {
@@ -242,11 +245,20 @@ impl Power {
                 holding.set(true);
                 let (power, fill, fired, holding) = (power.clone(), fill.clone(), fired.clone(), holding.clone());
                 let last = Cell::new(None::<f64>);
+                // Where the fill stood when the hold was let go, so the drain takes DRAIN_MS from there.
+                let drain_from = Cell::new(None::<f64>);
                 tile.add_tick_callback(move |tile, clock| {
                     let now = clock.frame_time() as f64 / 1000.0;
                     let dt = now - last.get().unwrap_or(now);
                     last.set(Some(now));
-                    let level = if holding.get() { fill.get() + dt / HOLD_MS } else { fill.get() - dt / DRAIN_MS };
+                    let level = if holding.get() {
+                        drain_from.set(None);
+                        fill.get() + dt / HOLD_MS
+                    } else {
+                        let from = drain_from.get().unwrap_or(fill.get());
+                        drain_from.set(Some(from));
+                        fill.get() - dt * from / DRAIN_MS
+                    };
                     fill.set(level.clamp(0.0, 1.0));
                     tile.queue_draw();
                     if holding.get() && fill.get() >= 1.0 {
@@ -334,14 +346,18 @@ fn draw_tile(cr: &cairo::Context, w: f64, h: f64, s: f64, action: Action, hovere
     let engaged = level > 0.0;
     theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, radius);
     if hovered {
-        theme::set_source(cr, palette.raised);
+        theme::set_source(cr, CHIP_FILL);
         let _ = cr.fill_preserve();
     }
     if engaged {
+        // The ramp sits a pixel inside the outline, its corners following the tile's.
         let _ = cr.save();
-        cr.clip_preserve();
+        cr.new_path();
+        theme::rounded_rect(cr, 1.0, 1.0, w - 2.0, h - 2.0, radius - 1.0);
+        cr.clip();
         let top = h * (1.0 - level);
-        let ramp = cairo::LinearGradient::new(0.0, h, 0.0, top);
+        // Strongest at the rising edge, fading toward the bottom.
+        let ramp = cairo::LinearGradient::new(0.0, top, 0.0, h);
         let (a, b) = (palette.accent, palette.accent_lit);
         ramp.add_color_stop_rgba(0.0, a.r, a.g, a.b, 0.7);
         ramp.add_color_stop_rgba(1.0, b.r, b.g, b.b, 0.15);
@@ -349,14 +365,15 @@ fn draw_tile(cr: &cairo::Context, w: f64, h: f64, s: f64, action: Action, hovere
         let _ = cr.set_source(&ramp);
         let _ = cr.fill();
         let _ = cr.restore();
+        theme::rounded_rect(cr, 0.5, 0.5, w - 1.0, h - 1.0, radius);
     }
     cr.set_line_width(1.0);
-    theme::set_source(cr, if hovered || engaged { palette.edge } else { palette.outline });
+    theme::set_source(cr, if hovered || engaged { CHIP_EDGE } else { palette.outline });
     let _ = cr.stroke();
 
     let accent = if action.needs_hold() { palette.accent_lit } else { CREAM };
-    let glyph_color = if engaged { BRIGHT } else if hovered { accent } else { ICON_DIM };
-    let label_color = if engaged { BRIGHT } else if hovered { SUBTLE } else { FAINT };
+    let glyph_color = if engaged { FLAME_CORE } else if hovered { accent } else { ICON_DIM };
+    let label_color = if engaged { FLAME_CORE } else if hovered { SUBTLE } else { FAINT };
 
     let glyph = pangocairo::functions::create_layout(cr);
     let style = TextStyle { family: config::get().icon_font.as_str(), ..TextStyle::new(22.0 * s, pango::Weight::Normal, glyph_color) };

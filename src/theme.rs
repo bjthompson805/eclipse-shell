@@ -110,6 +110,8 @@ pub const SCRIM: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.35 };
 // Sky colours for the launcher's day/night arc; deliberately not wallpaper-tinted.
 /// Charging glow.
 pub const FLAME: Rgba = Rgba::rgb8(0xff, 0x9e, 0x64);
+/// Glyphs and labels on a heating hold-to-confirm fill.
+pub const FLAME_CORE: Rgba = Rgba::rgb8(0xff, 0xd2, 0xbf);
 pub const SUN_GOLD: Rgba = Rgba::rgb8(0xff, 0xc7, 0x77);
 pub const MOON_GLOW: Rgba = Rgba::rgb8(0x7a, 0xa2, 0xf7);
 pub const MOON_DISC: Rgba = Rgba::rgb8(0xc8, 0xd3, 0xf5);
