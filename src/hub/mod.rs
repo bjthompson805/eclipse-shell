@@ -391,6 +391,7 @@ impl Hub {
         hub.window.add_controller(keys);
 
         // Follow an update run on the Updates page; check again once it ends.
+        // A finished one installed a new hub, so this one hands over to it.
         glib::timeout_add_local(Duration::from_secs(1), {
             let hub = Rc::downgrade(&hub);
             move || {
@@ -398,6 +399,10 @@ impl Hub {
                 let text = updates::run_text();
                 if text != *hub.run_text.borrow() {
                     let was_running = updates::run(&hub.run_text.borrow()).is_some_and(|r| r.phase == "running");
+                    if was_running && updates::run(&text).is_some_and(|r| r.phase == "done") {
+                        hub.reopen();
+                        return glib::ControlFlow::Break;
+                    }
                     *hub.run_text.borrow_mut() = text;
                     if hub.page.get() == Page::Updates && hub.query.borrow().is_empty() {
                         hub.show_content();
@@ -415,6 +420,16 @@ impl Hub {
         search.grab_focus();
         hub.check_updates();
         hub
+    }
+
+    /// Closes this hub and opens the installed one on the Updates page. The
+    /// new one waits until this one has let go of its D-Bus name, else it
+    /// would only hand this one the command line.
+    fn reopen(&self) {
+        use std::os::unix::process::CommandExt;
+        let Ok(exe) = std::env::current_exe() else { return };
+        let _ = std::process::Command::new("sh").args(["-c", "sleep 1; exec \"$0\" hub updates"]).arg(exe).process_group(0).stdin(std::process::Stdio::null()).spawn();
+        self.window.close();
     }
 
     /// Runs the update check in the background, then redraws the page.
