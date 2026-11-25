@@ -144,8 +144,8 @@ fn start(opts: Start) -> glib::ExitCode {
         notify(&["Screen recording", "A recording is already running"]);
         return glib::ExitCode::SUCCESS;
     }
-    if glib::find_program_in_path("wf-recorder").is_none() {
-        notify(&["-u", "critical", "Screen recording failed", "wf-recorder is not installed"]);
+    // Installed on first use; ensure() says why if it can't be.
+    if !crate::deps::ensure("wf-recorder", "wf-recorder") {
         eprintln!("eclipse-shell record: wf-recorder is not installed");
         return glib::ExitCode::FAILURE;
     }

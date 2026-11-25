@@ -289,6 +289,10 @@ fn toggle_region() {
     }
     let (done, picked) = async_channel::bounded::<Option<String>>(1);
     std::thread::spawn(move || {
+        if !crate::deps::ensure("slurp", "slurp") {
+            let _ = done.send_blocking(None);
+            return;
+        }
         let out = std::process::Command::new("slurp").args(["-f", "%wx%h+%x+%y"]).stderr(std::process::Stdio::null()).output();
         let g = out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
         let _ = done.send_blocking(g.filter(|g| valid_geometry(g)));

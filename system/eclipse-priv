@@ -37,13 +37,16 @@
 #       A keyboard or mouse through bthidd.
 #   eclipse-priv bt power on|off
 #       Detach or attach the adapter's driver.
+#   eclipse-priv pkg-install wf-recorder|wl-clipboard|cliphist|grim|slurp
+#       Install a tool the shell runs, the first time it's needed. Only
+#       these: it never upgrades or installs anything else.
 #
 # SPDX-License-Identifier: BSD-2-Clause
 set -eu
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 usage() {
-	sed -n '6,41p' "$0" >&2
+	sed -n '6,44p' "$0" >&2
 	exit 2
 }
 
@@ -495,5 +498,12 @@ charge-limit) shift; charge_limit "$@" ;;
 wifi) [ $# -eq 2 ] || usage; wifi "$2" ;;
 n1wifi) shift; n1wifi "$@" ;;
 bt) shift; bt "$@" ;;
+pkg-install)
+	[ $# -eq 2 ] || usage
+	case "$2" in
+	wf-recorder | wl-clipboard | cliphist | grim | slurp) pkg install -y "$2" ;;
+	*) usage ;;
+	esac
+	;;
 *) usage ;;
 esac

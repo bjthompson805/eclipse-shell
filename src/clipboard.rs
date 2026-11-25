@@ -32,9 +32,14 @@ thread_local! {
     static THUMBS: RefCell<HashMap<String, gdk::Texture>> = RefCell::default();
 }
 
-/// Starts recording copies, unless something already is.
+/// Starts recording copies, unless something already is; installs
+/// wl-clipboard and cliphist first if they're missing.
 pub fn start() {
     glib::spawn_future_local(async {
+        let tools = gio::spawn_blocking(|| crate::deps::ensure("wl-paste", "wl-clipboard") && crate::deps::ensure("cliphist", "cliphist")).await;
+        if !tools.unwrap_or(false) {
+            return;
+        }
         for kind in ["text", "image"] {
             let pattern = format!("wl-paste --type {kind} --watch cliphist");
             if output(&["pgrep", "-f", &pattern]).await.is_some_and(|o| !o.trim().is_empty()) {

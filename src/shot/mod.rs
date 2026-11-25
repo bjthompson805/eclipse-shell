@@ -229,6 +229,9 @@ async fn capture(monitor_mode: bool) -> Option<Rc<Shot>> {
         .unwrap_or_default();
     let windows = clients.and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok()).map(|v| parse_windows(&v, &active_ws)).unwrap_or_default();
 
+    if !gio::spawn_blocking(|| crate::deps::ensure("grim", "grim")).await.unwrap_or(false) {
+        return None;
+    }
     // Every monitor at once, as uncompressed PPM: grim's fastest output.
     let grabs: Vec<_> = monitors
         .into_iter()
@@ -1057,7 +1060,9 @@ impl Shot {
             if let Err(e) = write_file(&path, &png) {
                 eprintln!("eclipse-shell screenshot: {}: {e}", path.display());
             }
-            clipboard(&png, "image/png");
+            if gio::spawn_blocking(|| crate::deps::ensure("wl-copy", "wl-clipboard")).await.unwrap_or(false) {
+                clipboard(&png, "image/png");
+            }
         });
     }
 
@@ -1112,7 +1117,9 @@ impl Shot {
             let result = gio::spawn_blocking(move || upload(&png)).await;
             match result {
                 Ok(Ok(url)) => {
-                    clipboard(url.as_bytes(), "text/plain;charset=utf-8");
+                    if gio::spawn_blocking(|| crate::deps::ensure("wl-copy", "wl-clipboard")).await.unwrap_or(false) {
+                        clipboard(url.as_bytes(), "text/plain;charset=utf-8");
+                    }
                     notify("Screenshot uploaded", &format!("Link copied: {url} (expires in 3 days)"));
                 }
                 Ok(Err(e)) => notify("Upload failed", &e),

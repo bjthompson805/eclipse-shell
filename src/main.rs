@@ -11,6 +11,7 @@ mod app_window;
 mod clipboard;
 mod clipboard_popout;
 mod controls;
+mod deps;
 mod config;
 mod display_popout;
 mod fader;
