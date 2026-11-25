@@ -1,10 +1,10 @@
 #!/bin/sh
 # eclipse-update: keeps eclipse-shell current. The checkout install.sh last
-# ran from is the channel; packages come from pkg.
+# ran from is the channel. It never upgrades system packages: install.sh only
+# adds the ones the shell needs that are missing.
 #
-#   eclipse-update status [--json]   commits behind origin + package upgrades
-#   eclipse-update update            boot environment, git pull, pkg upgrade,
-#                                    install.sh
+#   eclipse-update status [--json]   commits behind origin
+#   eclipse-update update            boot environment, git pull, install.sh
 #   eclipse-update rollback <be>     boot a pre-update boot environment next
 #
 # `update` publishes its progress to $XDG_RUNTIME_DIR/eclipse-update.json,
@@ -24,23 +24,10 @@ repo() {
 	printf '%s' "$r"
 }
 
-priv() {
-	$as_root -n /usr/local/libexec/eclipse-priv "$@"
-}
-
-# Commits as {name, old, new} rows: subject, "", hash.
+# Commits as {subject, hash} rows.
 commit_rows() {
 	git -C "$1" log --format='%h%x09%s' "$2" 2>/dev/null |
-		jq -R 'split("\t") | {name: (.[1:] | join("\t")), old: "", new: .[0]}' | jq -s .
-}
-
-# Packages with a newer version in the catalogue, as {name, old, new}.
-pkg_rows() {
-	pkg version -vRl '<' 2>/dev/null | awk '{
-		nv = $1; name = nv; sub(/-[^-]+$/, "", name); old = substr(nv, length(name) + 2)
-		new = ""; if (match($0, /remote has [^)]+/)) new = substr($0, RSTART + 11, RLENGTH - 11)
-		printf "%s\t%s\t%s\n", name, old, new
-	}' | jq -R 'split("\t") | {name: .[0], old: .[1], new: .[2]}' | jq -s .
+		jq -R 'split("\t") | {subject: (.[1:] | join("\t")), hash: .[0]}' | jq -s .
 }
 
 status() {
@@ -54,25 +41,23 @@ status() {
 	else
 		up=$head behind=0 incoming='[]'
 	fi
-	priv pkg-update >/dev/null 2>&1
-	pkgs=$(pkg_rows)
 	recent=$(commit_rows "$r" '-n8')
 	json=$(jq -n --arg head "$head" --arg up "$up" --arg branch "$branch" \
-		--argjson behind "$behind" --argjson incoming "$incoming" --argjson pkgs "$pkgs" --argjson recent "$recent" '{
+		--argjson behind "$behind" --argjson incoming "$incoming" --argjson recent "$recent" '{
 			installed: $head, latest: $up, branch: $branch,
-			commits: $incoming, packages: $pkgs, recent: $recent, behind: $behind
+			commits: $incoming, recent: $recent, behind: $behind
 		}')
 	if [ "${1:-}" = --json ]; then
 		printf '%s\n' "$json"
 	else
 		printf '%s\n' "$json" | jq -r '"branch:    \(.branch) @ \(.installed)",
-			"behind:    \(.behind) commit(s)", "packages:  \(.packages | length) upgrade(s)"'
+			"behind:    \(.behind) commit(s)"'
 	fi
 }
 
 # ---- update run state --------------------------------------------------------
 
-steps="snapshot pull packages install"
+steps="snapshot pull install"
 step_state=""
 log=""
 be=""
@@ -121,11 +106,6 @@ update() {
 	say "git pull in $r"
 	git -C "$r" pull --ff-only || fail pull "Pulling" "git pull --ff-only failed in $r"
 	set_step pull ok
-
-	set_step packages running; publish running "Upgrading packages"
-	say "pkg upgrade"
-	$as_root pkg upgrade -y || fail packages "Upgrading packages" "pkg upgrade failed"
-	set_step packages ok
 
 	set_step install running; publish running "Installing"
 	say "install.sh"

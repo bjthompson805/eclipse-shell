@@ -89,7 +89,7 @@ impl Page {
             Self::Rules => "How an app's windows open: floating, centred, pinned, at a size or on a workspace. Rules apply to windows opened after the change.",
             Self::Startup => "What starts when you log in.",
             Self::Keybinds => "Every shortcut in your Hyprland config, read from binds.lua and user.lua.",
-            Self::Updates => "New commits to the checkout you installed from, and package upgrades. An update makes a boot environment first, so it can be rolled back.",
+            Self::Updates => "New commits to the checkout you installed from. An update pulls them and reinstalls the shell, after a boot environment to roll back to; it leaves system packages alone.",
         }
     }
 }
@@ -464,15 +464,13 @@ impl Hub {
         words.set_valign(gtk::Align::Center);
         let plural = |n: usize| if n == 1 { "" } else { "s" };
         let (title, detail) = match &status {
-            _ if self.checking.get() => ("Checking for updates…".to_owned(), "Fetching the checkout's origin and the package catalogue.".to_owned()),
+            _ if self.checking.get() => ("Checking for updates…".to_owned(), "Fetching the checkout's origin.".to_owned()),
             None => ("Not checked yet".to_owned(), String::new()),
             Some(Err(e)) => ("Couldn't check for updates".to_owned(), e.clone()),
             Some(Ok(st)) => {
-                let title = match (st.commits.len(), st.packages.len()) {
-                    (0, 0) => "Up to date".to_owned(),
-                    (c, 0) => format!("{c} new commit{}", plural(c)),
-                    (0, p) => format!("{p} package upgrade{}", plural(p)),
-                    (c, p) => format!("{c} new commit{} and {p} package upgrade{}", plural(c), plural(p)),
+                let title = match st.commits.len() {
+                    0 => "Up to date".to_owned(),
+                    c => format!("{c} new commit{}", plural(c)),
                 };
                 (title, format!("{} @ {}", st.branch, st.installed))
             }
@@ -493,7 +491,7 @@ impl Hub {
                 hub.check_updates();
             }
         }));
-        let pending = matches!(&status, Some(Ok(st)) if st.pending() > 0);
+        let pending = matches!(&status, Some(Ok(st)) if !st.commits.is_empty());
         let hub = Rc::downgrade(self);
         head.append(&ui::button(s, Some("download"), "Update", true, pending && !running, move || {
             if let Some(hub) = hub.upgrade() {
@@ -532,7 +530,6 @@ impl Hub {
                 let name = match step.name.as_str() {
                     "snapshot" => "Boot environment",
                     "pull" => "Pull the checkout",
-                    "packages" => "Upgrade packages",
                     "install" => "Run install.sh",
                     other => other,
                 };
@@ -564,12 +561,8 @@ impl Hub {
 
         // What's incoming, else what the install already has.
         let Some(Ok(st)) = &status else { return };
-        let recent: &[updates::Item] = if st.pending() == 0 { &st.recent } else { &[] };
-        let sections: [(&str, &[updates::Item], bool); 3] = [("Incoming commits", &st.commits, false), ("Package upgrades", &st.packages, true), ("Recent changes", recent, false)];
-        for (heading, items, package) in sections {
-            if items.is_empty() {
-                continue;
-            }
+        let (heading, items) = if st.commits.is_empty() { ("Recent changes", &st.recent) } else { ("Incoming commits", &st.commits) };
+        if !items.is_empty() {
             self.content.append(&popout::eyebrow(s, heading));
             let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
             for (i, item) in items.iter().enumerate() {
@@ -577,13 +570,12 @@ impl Hub {
                     list.append(&popout::divider());
                 }
                 let row = line();
-                let name = TextStyle::new(11.0 * s, pango::Weight::Medium, CREAM).label(&item.name);
-                name.set_xalign(0.0);
-                name.set_ellipsize(pango::EllipsizeMode::End);
-                popout::fill(&name);
-                row.append(&name);
-                let version = if package { format!("{} → {}", item.old, item.new) } else { item.new.clone() };
-                row.append(&TextStyle::new(9.5 * s, pango::Weight::Medium, FAINT).mono().label(&version));
+                let subject = TextStyle::new(11.0 * s, pango::Weight::Medium, CREAM).label(&item.subject);
+                subject.set_xalign(0.0);
+                subject.set_ellipsize(pango::EllipsizeMode::End);
+                popout::fill(&subject);
+                row.append(&subject);
+                row.append(&TextStyle::new(9.5 * s, pango::Weight::Medium, FAINT).mono().label(&item.hash));
                 list.append(&row);
             }
             self.content.append(&popout::card(&list));

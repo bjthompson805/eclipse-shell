@@ -1,6 +1,7 @@
 //! What the Updates page shows: `eclipse-update status --json` (commits the
-//! checkout is behind, package upgrades) and the progress an update run
-//! publishes to $XDG_RUNTIME_DIR/eclipse-update.json.
+//! checkout is behind) and the progress an update run publishes to
+//! $XDG_RUNTIME_DIR/eclipse-update.json. System packages are the user's to
+//! upgrade; an update never touches them.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -9,32 +10,24 @@ use gtk::glib;
 use gtk4 as gtk;
 use serde_json::Value;
 
-/// A commit (subject, hash) or a package (name, old version, new version).
 #[derive(Clone)]
-pub struct Item {
-    pub name: String,
-    pub old: String,
-    pub new: String,
+pub struct Commit {
+    pub subject: String,
+    pub hash: String,
 }
 
 #[derive(Clone)]
 pub struct Status {
     pub branch: String,
     pub installed: String,
-    pub commits: Vec<Item>,
-    pub packages: Vec<Item>,
-    pub recent: Vec<Item>,
+    /// What a pull would bring in.
+    pub commits: Vec<Commit>,
+    pub recent: Vec<Commit>,
 }
 
-impl Status {
-    pub fn pending(&self) -> usize {
-        self.commits.len() + self.packages.len()
-    }
-}
-
-fn items(v: &Value) -> Vec<Item> {
+fn commits(v: &Value) -> Vec<Commit> {
     let text = |i: &Value, k: &str| i[k].as_str().unwrap_or_default().to_owned();
-    v.as_array().into_iter().flatten().map(|i| Item { name: text(i, "name"), old: text(i, "old"), new: text(i, "new") }).collect()
+    v.as_array().into_iter().flatten().map(|i| Commit { subject: text(i, "subject"), hash: text(i, "hash") }).collect()
 }
 
 fn script() -> PathBuf {
@@ -47,7 +40,7 @@ pub fn repo() -> Option<String> {
     Some(text.trim().to_owned()).filter(|r| !r.is_empty())
 }
 
-/// Fetches origin and checks pkg; blocks (network), so call it off the main
+/// Fetches origin; blocks (network), so call it off the main
 /// thread. Err is the reason, for the page.
 pub fn check() -> Result<Status, String> {
     let out = Command::new(script()).args(["status", "--json"]).output().map_err(|e| format!("Couldn't run eclipse-update: {e}. Run install.sh again."))?;
@@ -57,10 +50,10 @@ pub fn check() -> Result<Status, String> {
     }
     let v: Value = serde_json::from_slice(&out.stdout).map_err(|_| "eclipse-update gave no status.".to_owned())?;
     let text = |k: &str| v[k].as_str().unwrap_or_default().to_owned();
-    Ok(Status { branch: text("branch"), installed: text("installed"), commits: items(&v["commits"]), packages: items(&v["packages"]), recent: items(&v["recent"]) })
+    Ok(Status { branch: text("branch"), installed: text("installed"), commits: commits(&v["commits"]), recent: commits(&v["recent"]) })
 }
 
-/// A step of a run: snapshot, pull, packages, install; its state is
+/// A step of a run: snapshot, pull, install; its state is
 /// pending, running, ok, skipped or failed.
 pub struct Step {
     pub name: String,
