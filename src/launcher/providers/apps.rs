@@ -53,10 +53,51 @@ fn id(app: &gio::AppInfo) -> String {
 
 pub fn launch(app: &gio::AppInfo) {
     record(&id(app));
+    if crate::config::get().launch_on_origin_workspace && launch_here(app) {
+        return;
+    }
     let context = gdk::Display::default().map(|d| d.app_launch_context());
     if let Err(err) = app.launch(&[], context.as_ref()) {
         eprintln!("eclipse-shell: launching {} failed: {err}", app.display_name());
     }
+}
+
+/// Launches through Hyprland onto the workspace focused now, so an app slow
+/// to start still opens where it was asked for. False when it can't, for
+/// terminal apps (they need gio's terminal lookup) or outside Hyprland.
+fn launch_here(app: &gio::AppInfo) -> bool {
+    let Some(desktop) = app.downcast_ref::<gio_unix::DesktopAppInfo>() else { return false };
+    if desktop.boolean("Terminal") {
+        return false;
+    }
+    let Some(exec) = desktop.string("Exec") else { return false };
+    let Some(workspace) = crate::hyprland::active_workspace() else { return false };
+    let mut cmd = strip_field_codes(&exec);
+    if let Some(dir) = desktop.string("Path").filter(|d| !d.is_empty()) {
+        cmd = format!("cd '{}' && {cmd}", dir.replace('\'', "'\\''"));
+    }
+    match crate::hyprland::exec_on(&cmd, workspace) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("eclipse-shell: launching {} on workspace {workspace} failed: {err}", app.display_name());
+            false
+        }
+    }
+}
+
+/// An Exec line with no files or URLs to pass: the % field codes go, and %%
+/// is a literal %.
+fn strip_field_codes(exec: &str) -> String {
+    let mut out = String::with_capacity(exec.len());
+    let mut chars = exec.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+        } else if chars.next() == Some('%') {
+            out.push('%');
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Apps matching `query`, best first.

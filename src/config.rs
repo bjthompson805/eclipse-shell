@@ -61,6 +61,10 @@ pub struct Settings {
     /// Show per-window app icons inside occupied workspace pills.
     pub workspace_icons: bool,
 
+    /// Open launched apps on the workspace they were launched from, however
+    /// long they take to start.
+    pub launch_on_origin_workspace: bool,
+
     pub font: String,
     pub mono_font: String,
     pub icon_font: String,
@@ -96,6 +100,7 @@ impl Default for Settings {
             bar_media: true,
             occupied_workspaces_only: true,
             workspace_icons: true,
+            launch_on_origin_workspace: true,
             font: "JetBrainsMono Nerd Font".into(),
             mono_font: "JetBrainsMono Nerd Font".into(),
             icon_font: "Material Symbols Rounded".into(),

@@ -175,6 +175,7 @@ fn rows() -> Vec<Row> {
         row(Bar, "Bar height", "The band's height before scaling.", number!(bar_height, 22.0, 44.0, 1.0, px_format)),
         row(Launcher, "Greeting", "Good morning, afternoon or evening on the card.", switch!(launcher_greeting)),
         row(Launcher, "Weather", "The forecast on the card.", switch!(launcher_weather)),
+        row(Launcher, "Open on launch workspace", "Apps open on the workspace you launched them from, even if you've moved on before they start. Terminal apps, and apps that hand off to a copy already running, open wherever they would anyway.", switch!(launch_on_origin_workspace)),
         row(Launcher, "Corner radius", "Of the launcher card and popouts.", number!(launcher_radius, 0.0, 32.0, 1.0, px_format)),
         row(Launcher, "Background blur", "How hard the desktop blurs behind the launcher; 0 leaves it alone.", number!(launcher_blur, 0.0, 30.0, 1.0, |v| if v == 0.0 { "off".into() } else { v.to_string() })),
         row(Frame, "Edge", "How far the frame shows past the screen edge.", number!(frame_edge, 0.0, 24.0, 1.0, px_format)),

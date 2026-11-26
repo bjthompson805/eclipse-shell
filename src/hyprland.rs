@@ -106,6 +106,21 @@ pub fn move_window(address: &str, workspace: i32) {
     command("moving a window", &format!("dispatch hl.dsp.window.move({{ workspace = {workspace}, window = \"address:{address}\" }})"));
 }
 
+/// The workspace with focus, if Hyprland answers.
+pub fn active_workspace() -> Option<i32> {
+    let reply: WorkspaceRef = serde_json::from_str(&request("j/activeworkspace").ok()?).ok()?;
+    Some(reply.id)
+}
+
+/// Runs a shell command whose windows open on `workspace`, leaving focus
+/// where it is. Hyprland follows the process and its children, so the window
+/// is placed as it maps rather than moved after.
+pub fn exec_on(cmd: &str, workspace: i32) -> io::Result<()> {
+    let quoted = cmd.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ");
+    let reply = request(&format!("eval hl.exec_cmd(\"{quoted}\", {{ workspace = \"{workspace} silent\" }})"))?;
+    if reply.trim() == "ok" { Ok(()) } else { Err(io::Error::other(reply.trim().to_owned())) }
+}
+
 /// Asks a window to close, as its own close button would.
 pub fn close_window(address: &str) {
     command("closing a window", &format!("dispatch hl.dsp.window.close({{ window = \"address:{address}\" }})"));
