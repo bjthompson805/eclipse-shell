@@ -102,6 +102,33 @@ for app in EclipseHub EclipseWalls EclipseRecorder; do
 		"$repo/data/io.github.bjthompson805.$app.desktop" >"$apps/io.github.bjthompson805.$app.desktop"
 done
 
+# ---- ~/.local/bin on the user's PATH -----------------------------------------
+
+# cargo installs eclipse-shell and its tools (and other apps put theirs) in
+# ~/.local/bin, so put it on the PATH of the shells a terminal opens. Each file
+# is written once and left alone after, so it can be edited or removed.
+fish_conf="$HOME/.config/fish/conf.d/eclipse-path.fish"
+if command -v fish >/dev/null 2>&1 && [ ! -e "$fish_conf" ]; then
+	mkdir -p "$(dirname "$fish_conf")"
+	cat >"$fish_conf" <<'EOF'
+# Written by eclipse-shell's install.sh: programs installed for this user.
+fish_add_path --global --path ~/.local/bin
+EOF
+	say "put ~/.local/bin on fish's PATH ($fish_conf)"
+fi
+# sh, bash and zsh login shells. The line checks the PATH itself, so a
+# profile read twice doesn't add it twice.
+for profile in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.zprofile"; do
+	case $profile in
+	"$HOME/.profile") ;;
+	*) [ -f "$profile" ] || continue ;;  # only ones already in use
+	esac
+	if ! grep -qs 'eclipse-shell: ~/.local/bin' "$profile"; then
+		printf '\n# eclipse-shell: ~/.local/bin on the PATH (added by its install.sh)\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH"; export PATH ;; esac\n' >>"$profile"
+		say "put ~/.local/bin on the PATH in $profile"
+	fi
+done
+
 # ---- root helper and boot script ---------------------------------------------
 
 if [ $system -eq 1 ]; then
